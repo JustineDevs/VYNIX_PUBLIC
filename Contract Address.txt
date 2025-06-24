@@ -1,0 +1,18 @@
+Contract All Routers:
+Token Address: 
+WPHRS Token Contract (With 18 Decimals): 0x76aaada469d23216be5f7c596fa25f282ff9b364
+USDC_NEW Token Contract (With 6 Decimals): 0x72df0bcd7276f2dfbac900d1ce63c272c4bccced
+USDT_NEW Token Contract (With 18 Decimals): 0xed59de2d7ad9c043442e381231ee3646fc3c2939
+USDC_OLD Token Contract (With 18 Decimals): 0xad902cf99c2de2f1ba5ec4d642fd7e49cae9ee37
+USDT_OLD Token Contract (With 18 Decimals): 0xed59de2d7ad9c043442e381231ee3646fc3c2939
+
+Swap (ERC20):
+Router Address 1: 0x1a4de519154ae51200b0ad7c90f7fac75547888a
+Router Address 2: 0x72df0bcd7276f2dfbac900d1ce63c272c4bccced
+
+Liquidity (ERC721):
+USDC_NEW: 0xf8a1d4ff0f9b9af7ce58e1fc1833688f3bfd6115
+USDT_NEW: 0xf8a1d4ff0f9b9af7ce58e1fc1833688f3bfd6115
+USDC_OLD: 0xf8a1d4ff0f9b9af7ce58e1fc1833688f3bfd6115
+USDT_OLD: 0xf8a1d4ff0f9b9af7ce58e1fc1833688f3bfd6115
+
