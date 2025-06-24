@@ -55,6 +55,34 @@ const ERC20_ABI = [
     "function allowance(address owner, address spender) external view returns (uint256)",
     "function balanceOf(address owner) external view returns (uint256)"
 ];
+// Add ABIs for deployed contracts
+const CUSTOM_ERC20_ABI = [
+    // Only relevant functions for interaction
+    "function name() view returns (string)",
+    "function symbol() view returns (string)",
+    "function totalSupply() view returns (uint256)",
+    "function balanceOf(address) view returns (uint256)",
+    "function transfer(address to, uint256 amount) returns (bool)",
+    "function approve(address spender, uint256 amount) returns (bool)",
+    "function cryptoWords(uint256) view returns (string)"
+];
+const CUSTOM_ERC1155_ABI = [
+    "function name() view returns (string)",
+    "function intervalWord() view returns (string)",
+    "function balanceOf(address, uint256) view returns (uint256)",
+    "function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data)",
+    "function cryptoWords(uint256) view returns (string)"
+];
+const CUSTOM_ERC165_ABI = [
+    "function getDescription() view returns (string)",
+    "function description() view returns (string)",
+    "function cryptoWords(uint256) view returns (string)"
+];
+const DEPLOYED_ADDRESSES = {
+    ERC20: "0x21FEEd10C4d26F8D69D6F677cf370192E40B038D",
+    ERC1155: "0x46Ac4a76adeC59D230c4189B61fe14E00071E25e",
+    ERC165: "0x6A32308EF415682543883Ec598dBfA78c9488771"
+};
 // Helper to write .env (now supports multiple keys)
 function saveEnv(vars) {
     // Always write PRIVATE_KEY first if present, then PRIVATE_KEY1,2,...
@@ -193,25 +221,7 @@ async function getTokens() {
             fs_1.default.writeFileSync(TOKENS_PATH, JSON.stringify(tokens, null, 2));
         }
     }
-    // Enhancement: Ask if user wants to add more pairs
-    let addMore = true;
-    while (addMore) {
-        const { wantMore } = await inquirer_1.default.prompt([
-            {
-                type: "confirm",
-                name: "wantMore",
-                message: "Do you want to add another token pair (smart contract)?",
-                default: false
-            }
-        ]);
-        if (wantMore) {
-            tokens.push(await promptAddToken());
-            fs_1.default.writeFileSync(TOKENS_PATH, JSON.stringify(tokens, null, 2));
-        }
-        else {
-            addMore = false;
-        }
-    }
+    // Removed repeated prompt for adding more tokens
     return tokens;
 }
 async function promptAddToken(existingTokens = []) {
@@ -662,14 +672,351 @@ async function networkOptionsMenu(networks, tokens) {
 }
 // Define available functions per network (can be extended)
 const NETWORK_FUNCTIONS = {
-    'Pharos Testnet': ["Swap", "Liquidity", "Transfer", "Faucet", "Deploy", "Check-in"],
+    'Pharos Testnet': ["Swap", "Liquidity", "Transfer", "Faucet", "Deploy", "Check-in", "Run all functions"],
     // You can still override for specific networks if needed
     // 'Some Network': ['Swap', ...],
 };
-const DEFAULT_FUNCTIONS = ["Swap", "Liquidity", "Transfer", "Faucet", "Deploy"];
+const DEFAULT_FUNCTIONS = ["Swap", "Liquidity", "Transfer", "Faucet", "Deploy", "Run all functions"];
 // Helper to get available functions for a network
 function getNetworkFunctions(networkName) {
     return NETWORK_FUNCTIONS[networkName] || DEFAULT_FUNCTIONS;
+}
+// --- Extracted function for Swap ---
+async function runSwap({ net, tokens, provider, privateKeys, walletIndex, simulationMode, log, contractExists, toFixedDecimals, ethers, swapCount, swapHistory }) {
+    // Router contract
+    const routerAbi = [
+        "function multicall(uint256 deadline, bytes[] data) external payable returns (bytes[] memory)"
+    ];
+    const routerAddress = "0x1a4de519154ae51200b0ad7c90f7fac75547888a";
+    const router = new ethers.Contract(routerAddress, routerAbi, provider);
+    // Filter valid tokens (contract exists)
+    const validTokens = [];
+    for (const token of tokens) {
+        const exists = await contractExists(provider, token.address);
+        if (exists)
+            validTokens.push(token);
+    }
+    if (validTokens.length === 0) {
+        log.error(`No valid token contracts found on ${net.name}. Skipping swap.`);
+        return { status: 'skipped', reason: 'No valid tokens' };
+    }
+    const wallet = new ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
+    walletIndex++;
+    const token = validTokens[Math.floor(Math.random() * validTokens.length)];
+    const min = token.min || 0.001, max = token.max || 0.01;
+    const amount = Math.floor((Math.random() * (max - min) + min) * Math.pow(10, token.decimals)) / Math.pow(10, token.decimals);
+    const amountWei = ethers.parseUnits(toFixedDecimals(amount, token.decimals), token.decimals);
+    const deadline = Math.floor(Date.now() / 1000) + 60 * 10;
+    const swapData = [];
+    log.step(`Preparing to swap ${amount} ${token.symbol} on ${net.name} using wallet ${wallet.address}`);
+    if (simulationMode) {
+        log.info(`[SIMULATION] Would perform: Swap ${amount} ${token.symbol} on ${net.name} using wallet ${wallet.address}`);
+        return { status: 'simulated' };
+    }
+    try {
+        log.loading(`Sending multicall transaction...`);
+        const tx = await router.connect(wallet).multicall(deadline, swapData);
+        log.loading("Waiting for confirmation...");
+        const receipt = await tx.wait();
+        if (receipt.status === 1) {
+            swapCount++;
+            log.success(`Swap #${swapCount} for ${token.symbol} on ${net.name} complete!`);
+            log.success(`Tx Hash: ${receipt.hash}`);
+            swapHistory.push({ status: 'success', txHash: receipt.hash, type: 'Swap', network: net.name });
+            return { status: 'success', txHash: receipt.hash };
+        }
+        else {
+            log.warn(`Swap #${swapCount + 1} failed. Check transaction.`);
+            return { status: 'failed' };
+        }
+    }
+    catch (err) {
+        log.error(`Swap error: ${err.message || err}`);
+        return { status: 'error', reason: err.message };
+    }
+}
+// --- Extracted function for Transfer ---
+async function runTransfer({ net, provider, privateKeys, walletIndex, simulationMode, log, receiver }) {
+    // For demo, just simulate or prompt for address
+    if (simulationMode) {
+        log.info("[SIMULATION] Would perform: Transfer PHRS");
+        return { status: 'simulated' };
+    }
+    let toAddress = receiver;
+    if (!toAddress) {
+        // Prompt for receiver address only if not provided
+        const input = await inquirer_1.default.prompt([
+            { type: "input", name: "toAddress", message: "Enter the receiver address for PHRS transfer (or leave blank to skip):" }
+        ]);
+        toAddress = input.toAddress;
+        if (!toAddress)
+            return { status: 'skipped', reason: 'No address provided' };
+    }
+    const wallet = new ethers_1.ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
+    walletIndex++;
+    const amount = 0.000001;
+    try {
+        log.step(`Preparing PHRS transfer: ${amount} PHRS to ${toAddress}`);
+        const balance = await provider.getBalance(wallet.address);
+        const required = ethers_1.ethers.parseEther(amount.toString());
+        if (balance < required) {
+            log.warn(`Skipping transfer: Insufficient PHRS balance: ${ethers_1.ethers.formatEther(balance)} < ${amount}`);
+            return { status: 'skipped', reason: 'Insufficient balance' };
+        }
+        const feeData = await provider.getFeeData();
+        const gasPrice = feeData.gasPrice || ethers_1.ethers.parseUnits('1', 'gwei');
+        const tx = await wallet.sendTransaction({
+            to: toAddress,
+            value: required,
+            gasLimit: 21000,
+            gasPrice,
+            maxFeePerGas: feeData.maxFeePerGas || undefined,
+            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || undefined,
+        });
+        log.loading(`Transfer transaction sent, waiting for confirmation...`);
+        const receipt = await provider.waitForTransaction(tx.hash);
+        log.success(`Transfer completed: ${receipt.hash}`);
+        log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${receipt.hash}`);
+        return { status: 'success', txHash: receipt.hash };
+    }
+    catch (error) {
+        log.error(`Transfer failed: ${error.message}`);
+        return { status: 'error', reason: error.message };
+    }
+}
+// --- Helper: claimFaucet (TypeScript) ---
+// If randomUseragent and HttpsProxyAgent are available, import them. Otherwise, use static User-Agent and skip proxy.
+// import randomUseragent from 'random-useragent';
+// import HttpsProxyAgent from 'https-proxy-agent';
+async function claimFaucetTS(wallet, log, proxy = null) {
+    try {
+        log.step(`Checking faucet eligibility for wallet: ${wallet.address}`);
+        const message = "pharos";
+        const signature = await wallet.signMessage(message);
+        log.step(`Signed message: ${signature}`);
+        const loginUrl = `https://api.pharosnetwork.xyz/user/login?address=${wallet.address}&signature=${signature}&inviteCode=03k2hgkzM1rh5Dog`;
+        const headers = {
+            accept: "application/json, text/plain, */*",
+            "accept-language": "en-US,en;q=0.8",
+            authorization: "Bearer null",
+            "sec-ch-ua": '"Chromium";v="136", "Brave";v="136", "Not.A/Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-site",
+            "sec-gpc": "1",
+            Referer: "https://testnet.pharosnetwork.xyz/",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            // "User-Agent": randomUseragent.getRandom(),
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        };
+        const axiosConfig = {
+            method: 'post',
+            url: loginUrl,
+            headers,
+            // httpsAgent: proxy ? new HttpsProxyAgent(proxy) : undefined,
+        };
+        log.loading('Sending login request for faucet...');
+        const loginResponse = await (0, axios_1.default)(axiosConfig);
+        const loginData = loginResponse.data;
+        if (loginData.code !== 0 || !loginData.data.jwt) {
+            log.error(`Login failed for faucet: ${loginData.msg || 'Unknown error'}`);
+            return false;
+        }
+        const jwt = loginData.data.jwt;
+        log.success(`Login successful for faucet, JWT: ${jwt}`);
+        const statusUrl = `https://api.pharosnetwork.xyz/faucet/status?address=${wallet.address}`;
+        const statusHeaders = {
+            ...headers,
+            authorization: `Bearer ${jwt}`,
+        };
+        log.loading('Checking faucet status...');
+        const statusResponse = await (0, axios_1.default)({
+            method: 'get',
+            url: statusUrl,
+            headers: statusHeaders,
+            // httpsAgent: proxy ? new HttpsProxyAgent(proxy) : undefined,
+        });
+        const statusData = statusResponse.data;
+        if (statusData.code !== 0 || !statusData.data) {
+            log.error(`Faucet status check failed: ${statusData.msg || 'Unknown error'}`);
+            return false;
+        }
+        if (!statusData.data.is_able_to_faucet) {
+            const nextAvailable = new Date(statusData.data.avaliable_timestamp * 1000).toLocaleString('en-US', { timeZone: 'Asia/Makassar' });
+            log.warn(`Faucet not available until: ${nextAvailable}`);
+            return false;
+        }
+        const claimUrl = `https://api.pharosnetwork.xyz/faucet/daily?address=${wallet.address}`;
+        log.loading('Claiming faucet...');
+        const claimResponse = await (0, axios_1.default)({
+            method: 'post',
+            url: claimUrl,
+            headers: statusHeaders,
+            // httpsAgent: proxy ? new HttpsProxyAgent(proxy) : undefined,
+        });
+        const claimData = claimResponse.data;
+        if (claimData.code === 0) {
+            log.success(`Faucet claimed successfully for ${wallet.address}`);
+            return true;
+        }
+        else {
+            log.error(`Faucet claim failed: ${claimData.msg || 'Unknown error'}`);
+            return false;
+        }
+    }
+    catch (error) {
+        log.error(`Faucet claim failed for ${wallet.address}: ${error.message}`);
+        return false;
+    }
+}
+// --- Helper: performCheckIn (TypeScript) ---
+async function performCheckInTS(wallet, log, proxy = null) {
+    try {
+        log.step(`Performing daily check-in for wallet: ${wallet.address}`);
+        const message = "pharos";
+        const signature = await wallet.signMessage(message);
+        log.step(`Signed message: ${signature}`);
+        const loginUrl = `https://api.pharosnetwork.xyz/user/login?address=${wallet.address}&signature=${signature}&inviteCode=03k2hgkzM1rh5Dog`;
+        const headers = {
+            accept: "application/json, text/plain, */*",
+            "accept-language": "en-US,en;q=0.8",
+            authorization: "Bearer null",
+            "sec-ch-ua": '"Chromium";v="136", "Brave";v="136", "Not.A/Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-site",
+            "sec-gpc": "1",
+            Referer: "https://testnet.pharosnetwork.xyz/",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            // "User-Agent": randomUseragent.getRandom(),
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        };
+        const axiosConfig = {
+            method: 'post',
+            url: loginUrl,
+            headers,
+            // httpsAgent: proxy ? new HttpsProxyAgent(proxy) : undefined,
+        };
+        log.loading('Sending login request...');
+        const loginResponse = await (0, axios_1.default)(axiosConfig);
+        const loginData = loginResponse.data;
+        if (loginData.code !== 0 || !loginData.data.jwt) {
+            log.error(`Login failed: ${loginData.msg || 'Unknown error'}`);
+            return null;
+        }
+        const jwt = loginData.data.jwt;
+        log.success(`Login successful, JWT: ${jwt}`);
+        const checkInUrl = `https://api.pharosnetwork.xyz/sign/in?address=${wallet.address}`;
+        const checkInHeaders = {
+            ...headers,
+            authorization: `Bearer ${jwt}`,
+        };
+        log.loading('Sending check-in request...');
+        const checkInResponse = await (0, axios_1.default)({
+            method: 'post',
+            url: checkInUrl,
+            headers: checkInHeaders,
+            // httpsAgent: proxy ? new HttpsProxyAgent(proxy) : undefined,
+        });
+        const checkInData = checkInResponse.data;
+        if (checkInData.code === 0) {
+            log.success(`Check-in successful for ${wallet.address}`);
+            return jwt;
+        }
+        else {
+            log.warn(`Check-in failed, possibly already checked in: ${checkInData.msg || 'Unknown error'}`);
+            return jwt;
+        }
+    }
+    catch (error) {
+        log.error(`Check-in failed for ${wallet.address}: ${error.message}`);
+        return null;
+    }
+}
+// --- Update runFaucet and runCheckin to use these helpers ---
+async function runFaucet({ net, provider, privateKeys, walletIndex, simulationMode, log }) {
+    if (simulationMode) {
+        log.info("[SIMULATION] Would perform: Faucet claim");
+        return { status: 'simulated' };
+    }
+    const wallet = new ethers_1.ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
+    walletIndex++;
+    try {
+        const success = await claimFaucetTS(wallet, log);
+        if (success) {
+            return { status: 'success' };
+        }
+        else {
+            return { status: 'failed' };
+        }
+    }
+    catch (err) {
+        log.error(`Faucet error: ${err.message}`);
+        return { status: 'error', reason: err.message };
+    }
+}
+async function runCheckin({ net, provider, privateKeys, walletIndex, simulationMode, log }) {
+    if (simulationMode) {
+        log.info("[SIMULATION] Would perform: Check-in");
+        return { status: 'simulated' };
+    }
+    const wallet = new ethers_1.ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
+    walletIndex++;
+    try {
+        const jwt = await performCheckInTS(wallet, log);
+        if (jwt) {
+            return { status: 'success' };
+        }
+        else {
+            return { status: 'failed' };
+        }
+    }
+    catch (err) {
+        log.error(`Check-in error: ${err.message}`);
+        return { status: 'error', reason: err.message };
+    }
+}
+// --- Extracted function for Deploy ---
+async function runDeploy({ net, provider, privateKeys, walletIndex, simulationMode, log }) {
+    if (simulationMode) {
+        log.info("[SIMULATION] Would perform: Deploy/StartTimer");
+        return { status: 'simulated' };
+    }
+    const contractAddress = "0x541805121a6E4C4DD2D36c90bFFc70A1379d66F3";
+    const contractAbi = [
+        { "inputs": [], "stateMutability": "nonpayable", "type": "constructor" },
+        { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "caller", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "newStartTime", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "newDuration", "type": "uint256" }], "name": "TimerReset", "type": "event" },
+        { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "starter", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "startTime", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "duration", "type": "uint256" }], "name": "TimerStarted", "type": "event" },
+        { "inputs": [], "name": "checkTimer", "outputs": [{ "internalType": "string", "name": "status", "type": "string" }, { "internalType": "uint256", "name": "timeLeft", "type": "uint256" }], "stateMutability": "view", "type": "function" },
+        { "inputs": [], "name": "getCurrentTime", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" },
+        { "inputs": [], "name": "isTimerActive", "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }], "stateMutability": "view", "type": "function" },
+        { "inputs": [], "name": "owner", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" },
+        { "inputs": [{ "internalType": "uint256", "name": "durationInSeconds", "type": "uint256" }], "name": "startTimer", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
+        { "inputs": [], "name": "timerDuration", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" },
+        { "inputs": [], "name": "timerStart", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }
+    ];
+    const wallet = new ethers_1.ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
+    walletIndex++;
+    const timerContract = new ethers_1.ethers.Contract(contractAddress, contractAbi, wallet);
+    const randomSeconds = Math.floor(Math.random() * (50 - 30 + 1)) + 30;
+    const duration = randomSeconds; // seconds
+    log.step(`Calling startTimer with duration ${duration} seconds...`);
+    try {
+        const tx = await timerContract.startTimer(duration);
+        log.loading("Waiting for startTimer confirmation...");
+        const receipt = await tx.wait();
+        log.success(`startTimer called. Tx: ${receipt.hash}`);
+        log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${receipt.hash}`);
+        return { status: 'success', txHash: receipt.hash };
+    }
+    catch (e) {
+        log.error(`startTimer failed: ${e.message}`);
+        return { status: 'error', reason: e.message };
+    }
 }
 // Enhanced Start Automation logic
 async function startAutomationMenu(networks, tokens) {
@@ -803,13 +1150,18 @@ async function mainMenu(networks, tokens, privateKey) {
                 name: "action",
                 message: "Main Menu - Choose an option:",
                 choices: [
+                    new inquirer_1.default.Separator("= Automation ="),
                     "Start Automation",
+                    new inquirer_1.default.Separator("= Network & Tokens ="),
                     "Network Options",
                     "Token Options",
                     "Swap Settings",
+                    new inquirer_1.default.Separator("= Info ="),
                     "Show Info & History",
-                    "Custom Contract Interactions",
-                    simulationMode ? "Disable Simulation Mode" : "Enable Simulation Mode",
+                    new inquirer_1.default.Separator("= Contracts ="),
+                    "Deploy Options",
+                    new inquirer_1.default.Separator("= Other ="),
+                    "Other",
                     "Exit"
                 ]
             }
@@ -829,18 +1181,11 @@ async function mainMenu(networks, tokens, privateKey) {
         else if (action === "Show Info & History") {
             await showInfoAndHistory(networks, tokens);
         }
-        else if (action === "Custom Contract Interactions") {
-            // Use the first private key and walletIndex 0 for custom contract menu
-            const wallet = new ethers_1.ethers.Wallet(privateKey, networks[0] ? new ethers_1.ethers.JsonRpcProvider(networks[0].rpc, networks[0].chainId) : undefined);
-            await customContractMenu(networks, tokens, wallet, networks[0] ? new ethers_1.ethers.JsonRpcProvider(networks[0].rpc, networks[0].chainId) : undefined);
+        else if (action === "Deploy Options") {
+            await deployOptionsMenu(networks, tokens, privateKey);
         }
-        else if (action === "Enable Simulation Mode") {
-            simulationMode = true;
-            log.success("Simulation/Dry Run Mode enabled. No real transactions will be sent.");
-        }
-        else if (action === "Disable Simulation Mode") {
-            simulationMode = false;
-            log.success("Simulation/Dry Run Mode disabled. Real transactions will be sent.");
+        else if (action === "Other") {
+            await otherMenu();
         }
         else if (action === "Exit") {
             log.warn("Exiting bot.");
@@ -848,436 +1193,343 @@ async function mainMenu(networks, tokens, privateKey) {
         }
     }
 }
-// Helper to get full range ticks for Uniswap V3
-const FULL_RANGE = { tickLower: -887272, tickUpper: 887272 };
-// Placeholder: Fetch real-time price for a pair (replace with real API/oracle logic)
-async function getPairPrice(token0, token1) {
-    // Example hardcoded prices for WPHRS pairs (update as needed)
-    if (token0.toLowerCase() === "0x76aaada469d23216be5f7c596fa25f282ff9b364" && token1.toLowerCase() === "0x72df0bcd7276f2dfbac900d1ce63c272c4bccced") {
-        return 501.175; // WPHRS/USDC_NEW
+async function otherMenu() {
+    while (true) {
+        const { otherAction } = await inquirer_1.default.prompt([
+            {
+                type: "list",
+                name: "otherAction",
+                message: "Other Options:",
+                choices: [
+                    simulationMode ? "Disable Simulation Mode" : "Enable Simulation Mode",
+                    "Back to Main Menu"
+                ]
+            }
+        ]);
+        if (otherAction === "Enable Simulation Mode") {
+            simulationMode = true;
+            log.success("Simulation/Dry Run Mode enabled. No real transactions will be sent.");
+        }
+        else if (otherAction === "Disable Simulation Mode") {
+            simulationMode = false;
+            log.success("Simulation/Dry Run Mode disabled. Real transactions will be sent.");
+        }
+        else if (otherAction === "Back to Main Menu") {
+            break;
+        }
     }
-    if (token0.toLowerCase() === "0x76aaada469d23216be5f7c596fa25f282ff9b364" && token1.toLowerCase() === "0xd4071393f8716661958f766df660033b3d35fd29") {
-        return 500.0; // WPHRS/USDT_NEW
-    }
-    if (token0.toLowerCase() === "0x76aaada469d23216be5f7c596fa25f282ff9b364" && token1.toLowerCase() === "0xad902cf99c2de2f1ba5ec4d642fd7e49cae9ee37") {
-        return 499.0; // WPHRS/USDC_OLD
-    }
-    if (token0.toLowerCase() === "0x76aaada469d23216be5f7c596fa25f282ff9b364" && token1.toLowerCase() === "0xed59de2d7ad9c043442e381231ee3646fc3c2939") {
-        return 498.0; // WPHRS/USDT_OLD
-    }
-    // Default fallback
-    return 500.0;
 }
-// Update automationLoop to accept networkFunctionMap and only run selected functions
+async function deployOptionsMenu(networks, tokens, privateKey) {
+    while (true) {
+        const { deployAction } = await inquirer_1.default.prompt([
+            {
+                type: "list",
+                name: "deployAction",
+                message: "Deploy Options:",
+                choices: [
+                    "Custom Contract Interactions",
+                    "Deployed Contracts",
+                    "Back"
+                ]
+            }
+        ]);
+        if (deployAction === "Custom Contract Interactions") {
+            const wallet = new ethers_1.ethers.Wallet(privateKey, networks[0] ? new ethers_1.ethers.JsonRpcProvider(networks[0].rpc, networks[0].chainId) : undefined);
+            while (true) {
+                await customContractMenu(networks, tokens, wallet, networks[0] ? new ethers_1.ethers.JsonRpcProvider(networks[0].rpc, networks[0].chainId) : undefined);
+                const { cont } = await inquirer_1.default.prompt([
+                    { type: "confirm", name: "cont", message: "Continue with another contract interaction?", default: false }
+                ]);
+                if (!cont)
+                    break;
+            }
+        }
+        else if (deployAction === "Deployed Contracts") {
+            const wallet = new ethers_1.ethers.Wallet(privateKey, networks[0] ? new ethers_1.ethers.JsonRpcProvider(networks[0].rpc, networks[0].chainId) : undefined);
+            while (true) {
+                await deployedContractsMenu(wallet, networks[0] ? new ethers_1.ethers.JsonRpcProvider(networks[0].rpc, networks[0].chainId) : undefined);
+                const { cont } = await inquirer_1.default.prompt([
+                    { type: "confirm", name: "cont", message: "Continue with another deployed contract?", default: false }
+                ]);
+                if (!cont)
+                    break;
+            }
+        }
+        else if (deployAction === "Back") {
+            break;
+        }
+    }
+}
+// In automationLoop, add logic to prompt for transfer receiver before running all functions
+let globalTransferReceiver = null;
 async function automationLoop(selectedNetworks, tokens, networkFunctionMap) {
     automationActive = true;
-    let swapCount = 0;
+    let swapCount = 0, transferCount = 0, faucetCount = 0, deployCount = 0, checkinCount = 0, liquidityCount = 0;
+    let swapHistory = [];
     let privateKeys = loadPrivateKeysFromEnv();
     let walletIndex = 0;
     log.success("Automation started! Press Ctrl+C to stop and return to menu.");
-    process.on("SIGINT", () => {
-        if (automationActive) {
-            log.warn("\nAutomation stopped. Returning to menu...");
-            automationActive = false;
+    let stopRequested = false;
+    let returnToStartAutomation = false;
+    process.on("SIGINT", async () => {
+        if (automationActive && !stopRequested) {
+            stopRequested = true;
+            const { confirmStop } = await inquirer_1.default.prompt([
+                { type: "confirm", name: "confirmStop", message: "Are you sure you want to stop automation?", default: true }
+            ]);
+            if (confirmStop) {
+                log.warn("\nAutomation stopped. Returning to Start Automation menu...");
+                automationActive = false;
+                returnToStartAutomation = true;
+            }
+            else {
+                stopRequested = false;
+            }
         }
     });
+    // Prompt for transfer receiver if running all functions, but only if not already set
+    let promptForReceiver = false;
+    for (const net of selectedNetworks) {
+        let selectedFuncs = networkFunctionMap ? networkFunctionMap[net.name] : ["Swap"];
+        if (selectedFuncs.includes("Run all functions")) {
+            selectedFuncs = getNetworkFunctions(net.name).filter(f => f !== "Run all functions");
+        }
+        if (selectedFuncs.length === 6 &&
+            selectedFuncs.includes("Swap") &&
+            selectedFuncs.includes("Liquidity") &&
+            selectedFuncs.includes("Transfer") &&
+            selectedFuncs.includes("Faucet") &&
+            selectedFuncs.includes("Deploy") &&
+            selectedFuncs.includes("Check-in")) {
+            promptForReceiver = true;
+            break;
+        }
+    }
+    if (promptForReceiver && !globalTransferReceiver) {
+        const { receiver } = await inquirer_1.default.prompt([
+            { type: "input", name: "receiver", message: "Enter the receiver address for all Transfer steps in automation:" }
+        ]);
+        globalTransferReceiver = receiver;
+    }
     while (automationActive) {
         for (const net of selectedNetworks) {
-            // Check if this network has selected functions
-            const selectedFuncs = networkFunctionMap ? networkFunctionMap[net.name] : ["Swap"];
+            let selectedFuncs = networkFunctionMap ? networkFunctionMap[net.name] : ["Swap"];
+            if (selectedFuncs.includes("Run all functions")) {
+                selectedFuncs = getNetworkFunctions(net.name).filter(f => f !== "Run all functions");
+            }
             if (!selectedFuncs || selectedFuncs.length === 0)
                 continue;
-            // Setup provider for this network
             const provider = new ethers_1.ethers.JsonRpcProvider(net.rpc, net.chainId);
-            // Router contract
-            const routerAbi = [
-                "function multicall(uint256 deadline, bytes[] data) external payable returns (bytes[] memory)"
-            ];
-            const routerAddress = "0x1a4de519154ae51200b0ad7c90f7fac75547888a";
-            const router = new ethers_1.ethers.Contract(routerAddress, routerAbi, provider);
-            // Filter valid tokens (contract exists)
-            const validTokens = [];
-            for (const token of tokens) {
-                const exists = await contractExists(provider, token.address);
-                if (!exists) {
-                    log.warn(`Token contract ${token.symbol} (${token.address}) does not exist on ${net.name}. Skipping.`);
-                }
-                else {
-                    validTokens.push(token);
-                }
-            }
-            if (validTokens.length === 0) {
-                log.error(`No valid token contracts found on ${net.name}. Returning to menu.`);
-                automationActive = false;
-                break;
-            }
-            // For each selected function, run the logic
-            for (const func of selectedFuncs) {
+            // If running all functions, do them in sequence, not parallel
+            if (selectedFuncs.length === 6 &&
+                selectedFuncs.includes("Swap") &&
+                selectedFuncs.includes("Liquidity") &&
+                selectedFuncs.includes("Transfer") &&
+                selectedFuncs.includes("Faucet") &&
+                selectedFuncs.includes("Deploy") &&
+                selectedFuncs.includes("Check-in")) {
+                let summary = [];
+                // SWAP
+                let swapResult = await runSwap({ net, tokens, provider, privateKeys, walletIndex, simulationMode, log, contractExists, toFixedDecimals, ethers: ethers_1.ethers, swapCount, swapHistory });
+                summary.push({ function: 'Swap', ...swapResult });
+                // LIQUIDITY
+                log.warn("Liquidity function is not yet implemented.");
+                summary.push({ function: 'Liquidity', status: 'skipped', reason: 'Not implemented' });
+                // TRANSFER
+                let transferResult = await runTransfer({ net, provider, privateKeys, walletIndex, simulationMode, log, receiver: globalTransferReceiver });
+                summary.push({ function: 'Transfer', ...transferResult });
+                // FAUCET
+                let faucetResult = await runFaucet({ net, provider, privateKeys, walletIndex, simulationMode, log });
+                summary.push({ function: 'Faucet', ...faucetResult });
+                // DEPLOY
+                let deployResult = await runDeploy({ net, provider, privateKeys, walletIndex, simulationMode, log });
+                summary.push({ function: 'Deploy', ...deployResult });
+                // CHECK-IN
+                let checkinResult = await runCheckin({ net, provider, privateKeys, walletIndex, simulationMode, log });
+                summary.push({ function: 'Check-in', ...checkinResult });
+                // Display summary
+                log.info("\n=== Bulk Run Summary ===");
+                summary.forEach((s) => {
+                    log.info(`${s.function}: ${s.status}${s.txHash ? ` (Tx: ${s.txHash})` : ''}${s.reason ? ` - ${s.reason}` : ''}`);
+                });
+                log.info("=======================\n");
+                // Wait random interval before next bulk run
                 if (!automationActive)
                     break;
+                const waitSec = Math.floor(Math.random() * (40 - 30 + 1)) + 30;
+                log.loading(`Waiting ${waitSec} seconds before next bulk run...`);
+                await new Promise(res => setTimeout(res, waitSec * 1000));
+                continue;
+            }
+            // Otherwise, run selected functions in parallel as before
+            await Promise.all(selectedFuncs.map(async (func) => {
+                if (!automationActive)
+                    return;
                 if (func === "Swap") {
-                    // Randomly select a token for each interval
-                    // (rest of swap logic as before)
-                    if (privateKeys.length === 0) {
-                        log.error("No private keys found. Please add at least one in .env.");
-                        automationActive = false;
-                        break;
+                    let swapResult = await runSwap({ net, tokens, provider, privateKeys, walletIndex, simulationMode, log, contractExists, toFixedDecimals, ethers: ethers_1.ethers, swapCount, swapHistory });
+                    if (swapResult.status === 'success') {
+                        swapCount++;
+                        log.success(`Swap #${swapCount} for ${tokens[0].symbol} on ${net.name} complete!`);
+                        log.success(`Tx Hash: ${swapResult.txHash}`);
+                        log.success(`Explorer: https://testnet.pharosscan.xyz/tx/${swapResult.txHash}`);
+                        swapHistory.push({ status: 'success', txHash: swapResult.txHash, type: 'Swap', network: net.name });
                     }
-                    const wallet = new ethers_1.ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
-                    walletIndex++;
-                    const token = validTokens[Math.floor(Math.random() * validTokens.length)];
-                    const min = token.min || 0.001, max = token.max || 0.01;
-                    const amount = Math.floor((Math.random() * (max - min) + min) * Math.pow(10, token.decimals)) / Math.pow(10, token.decimals);
-                    const amountWei = ethers_1.ethers.parseUnits(toFixedDecimals(amount, token.decimals), token.decimals);
-                    const deadline = Math.floor(Date.now() / 1000) + 60 * 10;
-                    const slippage = token.slippage || 1;
-                    const direction = token.direction || `A→B (${token.symbol} to USDC)`;
-                    // Placeholder: encode swap data for multicall
-                    // TODO: Replace with actual swap encoding when ABI is provided
-                    const swapData = [];
-                    log.step(`Preparing to swap ${amount} ${token.symbol} on ${net.name} using wallet ${wallet.address}`);
-                    if (simulationMode) {
-                        log.info(`[SIMULATION] Would perform: Swap ${amount} ${token.symbol} on ${net.name} using wallet ${wallet.address}`);
-                        continue;
+                    else {
+                        log.warn(`Swap #${swapCount + 1} failed. Reason: ${swapResult.reason}`);
+                        swapHistory.push({ status: swapResult.status, type: 'Swap', network: net.name, reason: swapResult.reason });
                     }
-                    try {
-                        log.loading(`Sending multicall transaction...`);
-                        const tx = await router.connect(wallet).multicall(deadline, swapData);
-                        log.loading("Waiting for confirmation...");
-                        const receipt = await tx.wait();
-                        if (receipt.status === 1) {
-                            swapCount++;
-                            log.success(`Swap #${swapCount} for ${token.symbol} on ${net.name} complete!`);
-                            log.success(`Tx Hash: ${receipt.hash}`);
-                            if (net.explorer) {
-                                log.success(`Explorer: ${net.explorer.replace(/\/$/, '')}/tx/${receipt.hash}`);
-                            }
-                            swapHistory.push(`Swap #${swapCount} ${token.symbol} on ${net.name} Tx: ${receipt.hash}`);
-                            saveSwapHistory(swapHistory);
-                        }
-                        else {
-                            log.warn(`Swap #${swapCount + 1} failed. Check transaction.`);
-                        }
-                    }
-                    catch (err) {
-                        log.error(`Swap error: ${err.message || err}`);
-                    }
-                    if (!automationActive)
-                        break;
-                    // Wait for interval
-                    let interval = 45000;
-                    if (swapSettings.intervalType === 'random') {
-                        interval = Math.floor(Math.random() * (swapSettings.maxInterval - swapSettings.minInterval) + swapSettings.minInterval);
-                    }
-                    else if (swapSettings.intervalType === 'fixed') {
-                        interval = swapSettings.fixedInterval;
-                    }
-                    log.loading(`Waiting ${(interval / 1000).toFixed(1)} seconds before next swap...`);
-                    await new Promise(res => setTimeout(res, interval));
                 }
                 else if (func === "Liquidity") {
                     // Liquidity logic is currently disabled. To be implemented soon.
                     log.step("(Stub) Liquidity function is not yet implemented.");
-                    continue;
+                    return;
                 }
                 else if (func === "Transfer") {
-                    let transferActive = true;
-                    process.on("SIGINT", () => {
-                        log.warn("\nTransfer loop stopped by user. Returning to menu...");
-                        transferActive = false;
-                    });
-                    let transferIndex = 0;
-                    while (true) {
-                        // Prompt for receiver address
-                        const { toAddress } = await inquirer_1.default.prompt([
-                            { type: "input", name: "toAddress", message: "Enter the receiver address for PHRS transfer (Ctrl+C to stop):" }
-                        ]);
-                        // Confirm action
-                        const { confirm } = await inquirer_1.default.prompt([
-                            { type: "confirm", name: "confirm", message: `Are you sure you want to continuously send 0.000001 PHRS to ${toAddress}?`, default: false }
-                        ]);
-                        if (!confirm) {
-                            log.warn("Transfer cancelled by user.");
-                            const { nextAction } = await inquirer_1.default.prompt([
-                                { type: "list", name: "nextAction", message: "What do you want to do?", choices: ["Enter new address", "Back to Main Menu"] }
-                            ]);
-                            if (nextAction === "Enter new address") {
-                                continue;
-                            }
-                            else {
-                                break;
-                            }
-                        }
-                        // Start continuous transfer loop
-                        transferActive = true;
-                        transferIndex = 0;
-                        while (transferActive) {
-                            const transferPHRS = async (wallet, provider, index) => {
-                                try {
-                                    const amount = 0.000001;
-                                    log.step(`Preparing PHRS transfer ${index + 1}: ${amount} PHRS to ${toAddress}`);
-                                    const balance = await provider.getBalance(wallet.address);
-                                    const required = ethers_1.ethers.parseEther(amount.toString());
-                                    if (balance < required) {
-                                        log.warn(`Skipping transfer ${index + 1}: Insufficient PHRS balance: ${ethers_1.ethers.formatEther(balance)} < ${amount}`);
-                                        return;
-                                    }
-                                    const feeData = await provider.getFeeData();
-                                    const gasPrice = feeData.gasPrice || ethers_1.ethers.parseUnits('1', 'gwei');
-                                    const tx = await wallet.sendTransaction({
-                                        to: toAddress,
-                                        value: required,
-                                        gasLimit: 21000,
-                                        gasPrice,
-                                        maxFeePerGas: feeData.maxFeePerGas || undefined,
-                                        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || undefined,
-                                    });
-                                    log.loading(`Transfer transaction ${index + 1} sent, waiting for confirmation...`);
-                                    const receipt = await provider.waitForTransaction(tx.hash);
-                                    log.success(`Transfer ${index + 1} completed: ${receipt.hash}`);
-                                    log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${receipt.hash}`);
-                                }
-                                catch (error) {
-                                    log.error(`Transfer ${index + 1} failed: ${error.message}`);
-                                    if (error.transaction) {
-                                        log.error(`Transaction details: ${JSON.stringify(error.transaction, null, 2)}`);
-                                    }
-                                    if (error.receipt) {
-                                        log.error(`Receipt: ${JSON.stringify(error.receipt, null, 2)}`);
-                                    }
-                                }
-                            };
-                            const wallet = new ethers_1.ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
-                            walletIndex++;
-                            await transferPHRS(wallet, provider, transferIndex);
-                            transferIndex++;
-                            // Wait a short interval before next send
-                            await new Promise(res => setTimeout(res, 2000));
-                        }
-                        // After loop is stopped (Ctrl+C), ask user what to do next
-                        const { nextAction } = await inquirer_1.default.prompt([
-                            { type: "list", name: "nextAction", message: "What do you want to do next?", choices: ["Enter new address", "Back to Main Menu"] }
-                        ]);
-                        if (nextAction === "Enter new address") {
-                            continue;
-                        }
-                        else {
-                            break;
-                        }
+                    let transferResult = await runTransfer({ net, provider, privateKeys, walletIndex, simulationMode, log, receiver: globalTransferReceiver });
+                    if (transferResult.status === 'success') {
+                        transferCount++;
+                        log.success(`Transfer completed: ${transferResult.txHash}`);
+                        log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${transferResult.txHash}`);
+                        swapHistory.push({ status: transferResult.status, type: 'Transfer', network: net.name, reason: transferResult.reason });
                     }
-                    continue;
+                    else {
+                        log.warn(`Transfer failed. Reason: ${transferResult.reason}`);
+                        swapHistory.push({ status: transferResult.status, type: 'Transfer', network: net.name, reason: transferResult.reason });
+                    }
                 }
                 else if (func === "Faucet") {
-                    // Faucet claim logic
-                    const claimFaucet = async (wallet, proxy = null) => {
-                        try {
-                            log.step(`Checking faucet eligibility for wallet: ${wallet.address}`);
-                            const message = "pharos";
-                            const signature = await wallet.signMessage(message);
-                            log.step(`Signed message: ${signature}`);
-                            const loginUrl = `https://api.pharosnetwork.xyz/user/login?address=${wallet.address}&signature=${signature}&invite_code=03k2hgkzM1rh5Dog`;
-                            const headers = {
-                                accept: "application/json, text/plain, */*",
-                                "accept-language": "en-US,en;q=0.8",
-                                authorization: "Bearer null",
-                                "sec-ch-ua": '"Chromium";v="136", "Brave";v="136", "Not.A/Brand";v="99"',
-                                "sec-ch-ua-mobile": "?0",
-                                "sec-ch-ua-platform": '"Windows"',
-                                "sec-fetch-dest": "empty",
-                                "sec-fetch-mode": "cors",
-                                "sec-fetch-site": "same-site",
-                                "sec-gpc": "1",
-                                Referer: "https://testnet.pharosnetwork.xyz/",
-                                "Referrer-Policy": "strict-origin-when-cross-origin",
-                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", // Replace with randomUseragent if available
-                            };
-                            const axiosConfig = {
-                                method: 'post',
-                                url: loginUrl,
-                                headers,
-                            };
-                            log.loading('Sending login request for faucet...');
-                            const loginResponse = await (0, axios_1.default)(axiosConfig);
-                            const loginData = loginResponse.data;
-                            if (loginData.code !== 0 || !loginData.data.jwt) {
-                                log.error(`Login failed for faucet: ${loginData.msg || 'Unknown error'}`);
-                                return false;
-                            }
-                            const jwt = loginData.data.jwt;
-                            log.success(`Login successful for faucet, JWT: ${jwt}`);
-                            const statusUrl = `https://api.pharosnetwork.xyz/faucet/status?address=${wallet.address}`;
-                            const statusHeaders = {
-                                ...headers,
-                                authorization: `Bearer ${jwt}`,
-                            };
-                            log.loading('Checking faucet status...');
-                            const statusResponse = await (0, axios_1.default)({
-                                method: 'get',
-                                url: statusUrl,
-                                headers: statusHeaders,
-                            });
-                            const statusData = statusResponse.data;
-                            if (statusData.code !== 0 || !statusData.data) {
-                                log.error(`Faucet status check failed: ${statusData.msg || 'Unknown error'}`);
-                                return false;
-                            }
-                            if (!statusData.data.is_able_to_faucet) {
-                                const nextAvailable = new Date(statusData.data.avaliable_timestamp * 1000).toLocaleString('en-US', { timeZone: 'Asia/Makassar' });
-                                log.warn(`Faucet not available until: ${nextAvailable}`);
-                                return false;
-                            }
-                            const claimUrl = `https://api.pharosnetwork.xyz/faucet/daily?address=${wallet.address}`;
-                            log.loading('Claiming faucet...');
-                            const claimResponse = await (0, axios_1.default)({
-                                method: 'post',
-                                url: claimUrl,
-                                headers: statusHeaders,
-                            });
-                            const claimData = claimResponse.data;
-                            if (claimData.code === 0) {
-                                log.success(`Faucet claimed successfully for ${wallet.address}`);
-                                return true;
-                            }
-                            else {
-                                log.error(`Faucet claim failed: ${claimData.msg || 'Unknown error'}`);
-                                return false;
-                            }
-                        }
-                        catch (error) {
-                            log.error(`Faucet claim failed for ${wallet.address}: ${error.message}`);
-                            return false;
-                        }
-                    };
-                    // Run faucet claim for the current wallet
-                    const wallet = new ethers_1.ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
-                    walletIndex++;
-                    await claimFaucet(wallet);
-                    continue;
+                    let faucetResult = await runFaucet({ net, provider, privateKeys, walletIndex, simulationMode, log });
+                    if (faucetResult.status === 'success') {
+                        faucetCount++;
+                        log.success(`Faucet claimed successfully.`);
+                        swapHistory.push({ status: faucetResult.status, type: 'Faucet', network: net.name, reason: faucetResult.reason });
+                    }
+                    else {
+                        log.warn(`Faucet claim failed. Reason: ${faucetResult.reason}`);
+                        swapHistory.push({ status: faucetResult.status, type: 'Faucet', network: net.name, reason: faucetResult.reason });
+                    }
                 }
                 else if (func === "Check-in") {
-                    // Daily check-in logic for Pharos Network
-                    const performCheckIn = async (wallet, proxy = null) => {
-                        try {
-                            log.step(`Performing daily check-in for wallet: ${wallet.address}`);
-                            const message = "pharos";
-                            const signature = await wallet.signMessage(message);
-                            log.step(`Signed message: ${signature}`);
-                            const loginUrl = `https://api.pharosnetwork.xyz/user/login?address=${wallet.address}&signature=${signature}&invite_code=03k2hgkzM1rh5Dog`;
-                            const headers = {
-                                accept: "application/json, text/plain, */*",
-                                "accept-language": "en-US,en;q=0.8",
-                                authorization: "Bearer null",
-                                "sec-ch-ua": '"Chromium";v="136", "Brave";v="136", "Not.A/Brand";v="99"',
-                                "sec-ch-ua-mobile": "?0",
-                                "sec-ch-ua-platform": '"Windows"',
-                                "sec-fetch-dest": "empty",
-                                "sec-fetch-mode": "cors",
-                                "sec-fetch-site": "same-site",
-                                "sec-gpc": "1",
-                                Referer: "https://testnet.pharosnetwork.xyz/",
-                                "Referrer-Policy": "strict-origin-when-cross-origin",
-                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", // Replace with randomUseragent if available
-                            };
-                            const axiosConfig = {
-                                method: 'post',
-                                url: loginUrl,
-                                headers,
-                            };
-                            log.loading('Sending login request...');
-                            const loginResponse = await (0, axios_1.default)(axiosConfig);
-                            const loginData = loginResponse.data;
-                            if (loginData.code !== 0 || !loginData.data.jwt) {
-                                log.error(`Login failed: ${loginData.msg || 'Unknown error'}`);
-                                return null;
-                            }
-                            const jwt = loginData.data.jwt;
-                            log.success(`Login successful, JWT: ${jwt}`);
-                            const checkInUrl = `https://api.pharosnetwork.xyz/sign/in?address=${wallet.address}`;
-                            const checkInHeaders = {
-                                ...headers,
-                                authorization: `Bearer ${jwt}`,
-                            };
-                            log.loading('Sending check-in request...');
-                            const checkInResponse = await (0, axios_1.default)({
-                                method: 'post',
-                                url: checkInUrl,
-                                headers: checkInHeaders,
-                            });
-                            const checkInData = checkInResponse.data;
-                            if (checkInData.code === 0) {
-                                log.success(`Check-in successful for ${wallet.address}`);
-                                return jwt;
-                            }
-                            else {
-                                log.warn(`Check-in failed, possibly already checked in: ${checkInData.msg || 'Unknown error'}`);
-                                return jwt;
-                            }
-                        }
-                        catch (error) {
-                            log.error(`Check-in failed for ${wallet.address}: ${error.message}`);
-                            return null;
-                        }
-                    };
-                    // Run check-in for the current wallet
-                    const wallet = new ethers_1.ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
-                    walletIndex++;
-                    await performCheckIn(wallet);
-                    continue;
+                    let checkinResult = await runCheckin({ net, provider, privateKeys, walletIndex, simulationMode, log });
+                    if (checkinResult.status === 'success') {
+                        checkinCount++;
+                        log.success(`Check-in successful.`);
+                        swapHistory.push({ status: checkinResult.status, type: 'Check-in', network: net.name, reason: checkinResult.reason });
+                    }
+                    else {
+                        log.warn(`Check-in failed. Reason: ${checkinResult.reason}`);
+                        swapHistory.push({ status: checkinResult.status, type: 'Check-in', network: net.name, reason: checkinResult.reason });
+                    }
                 }
                 else if (func === "Deploy") {
-                    // Interact with deployed PerpetualTimer contract and call startTimer in a loop
-                    let deployActive = true;
-                    process.on("SIGINT", () => {
-                        log.warn("\nDeploy loop stopped by user. Returning to menu...");
-                        deployActive = false;
-                    });
-                    // Use provided contract address and ABI
-                    const contractAddress = "0x541805121a6E4C4DD2D36c90bFFc70A1379d66F3";
-                    const contractAbi = [
-                        { "inputs": [], "stateMutability": "nonpayable", "type": "constructor" },
-                        { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "caller", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "newStartTime", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "newDuration", "type": "uint256" }], "name": "TimerReset", "type": "event" },
-                        { "anonymous": false, "inputs": [{ "indexed": true, "internalType": "address", "name": "starter", "type": "address" }, { "indexed": false, "internalType": "uint256", "name": "startTime", "type": "uint256" }, { "indexed": false, "internalType": "uint256", "name": "duration", "type": "uint256" }], "name": "TimerStarted", "type": "event" },
-                        { "inputs": [], "name": "checkTimer", "outputs": [{ "internalType": "string", "name": "status", "type": "string" }, { "internalType": "uint256", "name": "timeLeft", "type": "uint256" }], "stateMutability": "view", "type": "function" },
-                        { "inputs": [], "name": "getCurrentTime", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" },
-                        { "inputs": [], "name": "isTimerActive", "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }], "stateMutability": "view", "type": "function" },
-                        { "inputs": [], "name": "owner", "outputs": [{ "internalType": "address", "name": "", "type": "address" }], "stateMutability": "view", "type": "function" },
-                        { "inputs": [{ "internalType": "uint256", "name": "durationInSeconds", "type": "uint256" }], "name": "startTimer", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
-                        { "inputs": [], "name": "timerDuration", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" },
-                        { "inputs": [], "name": "timerStart", "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }], "stateMutability": "view", "type": "function" }
-                    ];
-                    const wallet = new ethers_1.ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
-                    walletIndex++;
-                    const timerContract = new ethers_1.ethers.Contract(contractAddress, contractAbi, wallet);
-                    log.step(`Interacting with PerpetualTimer at ${contractAddress}`);
-                    // Loop: call startTimer with random interval (1-5 min)
-                    while (deployActive) {
-                        const randomMinutes = Math.floor(Math.random() * (5 - 1 + 1)) + 1;
-                        const duration = randomMinutes * 60; // seconds
-                        log.step(`Calling startTimer with duration ${duration} seconds (${randomMinutes} min)...`);
-                        try {
-                            const tx = await timerContract.startTimer(duration);
-                            log.loading("Waiting for startTimer confirmation...");
-                            const receipt = await tx.wait();
-                            log.success(`startTimer called. Tx: ${receipt.hash}`);
-                            log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${receipt.hash}`);
-                        }
-                        catch (e) {
-                            log.error(`startTimer failed: ${e.message}`);
-                        }
-                        // Wait for the same random interval before next call
-                        if (!deployActive)
-                            break;
-                        log.loading(`Waiting ${randomMinutes} minutes before next startTimer...`);
-                        await new Promise(res => setTimeout(res, duration * 1000));
+                    let deployResult = await runDeploy({ net, provider, privateKeys, walletIndex, simulationMode, log });
+                    if (deployResult.status === 'success') {
+                        deployCount++;
+                        log.success(`Deploy/StartTimer called. Tx: ${deployResult.txHash}`);
+                        log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${deployResult.txHash}`);
+                        swapHistory.push({ status: deployResult.status, type: 'Deploy', network: net.name, reason: deployResult.reason });
                     }
-                    continue;
+                    else {
+                        log.warn(`Deploy/StartTimer failed. Reason: ${deployResult.reason}`);
+                        swapHistory.push({ status: deployResult.status, type: 'Deploy', network: net.name, reason: deployResult.reason });
+                    }
                 }
-            }
+            }));
             if (!automationActive)
                 break;
         }
         if (!automationActive)
             break;
+    }
+    // If user stopped automation and returnToStartAutomation is set, go back to Start Automation menu
+    if (returnToStartAutomation) {
+        await startAutomationMenu(selectedNetworks, tokens);
+    }
+}
+async function deployedContractsMenu(wallet, provider) {
+    while (true) {
+        const { contractType } = await inquirer_1.default.prompt([
+            {
+                type: "list",
+                name: "contractType",
+                message: "Select a deployed contract to interact with:",
+                choices: [
+                    { name: "CustomERC20", value: "ERC20" },
+                    { name: "CustomERC1155", value: "ERC1155" },
+                    { name: "CustomERC165", value: "ERC165" },
+                    { name: "Back", value: "back" }
+                ]
+            }
+        ]);
+        if (contractType === "back")
+            break;
+        if (contractType === "ERC20") {
+            const contract = new ethers_1.ethers.Contract(DEPLOYED_ADDRESSES.ERC20, CUSTOM_ERC20_ABI, wallet);
+            const name = await contract.name();
+            const symbol = await contract.symbol();
+            const totalSupply = await contract.totalSupply();
+            const myBalance = await contract.balanceOf(wallet.address);
+            console.log(chalk_1.default.green(`\nCustomERC20: ${name} (${symbol})`));
+            console.log(`Total Supply: ${ethers_1.ethers.formatUnits(totalSupply, 18)}`);
+            console.log(`Your Balance: ${ethers_1.ethers.formatUnits(myBalance, 18)}`);
+            const { erc20Action } = await inquirer_1.default.prompt([
+                { type: "list", name: "erc20Action", message: "Action:", choices: ["Transfer", "Show Crypto Word", "Back"] }
+            ]);
+            if (erc20Action === "Transfer") {
+                const { to, amount } = await inquirer_1.default.prompt([
+                    { type: "input", name: "to", message: "Recipient address:" },
+                    { type: "input", name: "amount", message: "Amount to transfer:" }
+                ]);
+                const tx = await contract.transfer(to, ethers_1.ethers.parseUnits(amount, 18));
+                console.log(chalk_1.default.yellow(`Sent! Tx: ${tx.hash}`));
+                await tx.wait();
+            }
+            else if (erc20Action === "Show Crypto Word") {
+                const { index } = await inquirer_1.default.prompt([
+                    { type: "input", name: "index", message: "Word index (0-255):", validate: (v) => !isNaN(Number(v)) && Number(v) >= 0 && Number(v) < 256 }
+                ]);
+                const word = await contract.cryptoWords(index);
+                console.log(chalk_1.default.cyan(`Word #${index}: ${word}`));
+            }
+        }
+        else if (contractType === "ERC1155") {
+            const contract = new ethers_1.ethers.Contract(DEPLOYED_ADDRESSES.ERC1155, CUSTOM_ERC1155_ABI, wallet);
+            const name = await contract.name();
+            const intervalWord = await contract.intervalWord();
+            console.log(chalk_1.default.green(`\nCustomERC1155: ${name} (Interval: ${intervalWord})`));
+            const { erc1155Action } = await inquirer_1.default.prompt([
+                { type: "list", name: "erc1155Action", message: "Action:", choices: ["Show Balance", "Show Crypto Word", "Back"] }
+            ]);
+            if (erc1155Action === "Show Balance") {
+                const { tokenId } = await inquirer_1.default.prompt([
+                    { type: "input", name: "tokenId", message: "Token ID:", default: "1" }
+                ]);
+                const bal = await contract.balanceOf(wallet.address, tokenId);
+                console.log(chalk_1.default.cyan(`Balance of token ${tokenId}: ${bal}`));
+            }
+            else if (erc1155Action === "Show Crypto Word") {
+                const { index } = await inquirer_1.default.prompt([
+                    { type: "input", name: "index", message: "Word index (0-255):", validate: (v) => !isNaN(Number(v)) && Number(v) >= 0 && Number(v) < 256 }
+                ]);
+                const word = await contract.cryptoWords(index);
+                console.log(chalk_1.default.cyan(`Word #${index}: ${word}`));
+            }
+        }
+        else if (contractType === "ERC165") {
+            const contract = new ethers_1.ethers.Contract(DEPLOYED_ADDRESSES.ERC165, CUSTOM_ERC165_ABI, wallet);
+            const desc = await contract.getDescription();
+            console.log(chalk_1.default.green(`\nCustomERC165 Description: ${desc}`));
+            const { erc165Action } = await inquirer_1.default.prompt([
+                { type: "list", name: "erc165Action", message: "Action:", choices: ["Show Crypto Word", "Back"] }
+            ]);
+            if (erc165Action === "Show Crypto Word") {
+                const { index } = await inquirer_1.default.prompt([
+                    { type: "input", name: "index", message: "Word index (0-255):", validate: (v) => !isNaN(Number(v)) && Number(v) >= 0 && Number(v) < 256 }
+                ]);
+                const word = await contract.cryptoWords(index);
+                console.log(chalk_1.default.cyan(`Word #${index}: ${word}`));
+            }
+        }
     }
 }
 async function main() {
