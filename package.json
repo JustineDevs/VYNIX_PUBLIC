@@ -5,6 +5,7 @@
     "hardhat": "^2.25.0"
   },
   "dependencies": {
+    "@uniswap/v3-periphery": "^1.4.4",
     "dotenv": "^16.5.0",
     "inquirer": "^12.6.3"
   }
