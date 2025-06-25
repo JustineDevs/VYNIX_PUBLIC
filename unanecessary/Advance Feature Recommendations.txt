@@ -1,0 +1,71 @@
+Here are some recommended features to further enhance your Testnet Automation Bot:
+
+---
+
+### 1. **Multi-Wallet Automation**
+- Allow the bot to cycle through all imported wallets for swaps (round-robin or random).
+- Option to run swaps in parallel across multiple wallets.
+
+### 2. **Advanced Swap Controls** ✔
+- Set min/max swap amounts per token.
+- Set slippage tolerance and minimum amount out.
+- Support for both directions (A→B and B→A) and custom swap paths.
+
+### 3. **Customizable Swap Scheduling** ✔
+- Allow user to set custom swap intervals (not just random).
+- Support for cron-like scheduling or time windows.
+
+### 4. **Telegram/Discord/Email Notifications**
+- Notify user of swap results, errors, or large events via Telegram, Discord, or email.
+
+### 5. **Web Dashboard**
+- Simple web UI to monitor status, view history, and control the bot remotely.
+
+### 6. **Gas Management**
+- Show estimated gas cost before each swap.
+- Option to skip swaps if gas is above a threshold.
+
+### 7. **Profit/Loss Tracking** ✔
+- Track and display PnL for each wallet and token pair.
+- Show historical charts of swaps and balances.
+
+### 8. **Automatic Token Approval** ✔
+- Detect and send approval transactions if needed before swapping.
+
+### 9. **Custom Contract Interactions** ✔
+- Allow user to add custom contract calls (not just swaps), e.g., staking, claiming, etc.
+
+### 10. **Backup & Restore**
+- Export/import all config and history as a backup file.
+
+### 11. **Security Features**
+- Option to encrypt `.env` or private keys with a password.
+- Warn if a mainnet key is detected.
+
+### 12. **Simulation/Dry Run Mode** ✔
+- Simulate swaps without sending real transactions for testing.
+
+### 13. **API Integration**
+- Expose a local API for external control or integration with other tools.
+
+### 14. **Automatic Updates**
+- Notify user if a new version of the bot is available.
+
+### 15. **Localization**
+- Support for multiple languages in the CLI.
+
+### 16. **Role-Based Access Control (RBAC)**
+- Allow different users (or API keys) to have different permissions (e.g., view-only, swap, admin).
+
+### 17. **Comprehensive Logging & Audit Trail**
+- Maintain detailed logs of all actions, errors, and user interactions for auditing and debugging.
+- Option to export logs.
+
+### 18. **Health Checks & Self-Healing** ✔
+- Periodically check bot/network health and auto-recover from common errors (e.g., reconnect on RPC failure).
+
+### 19. **Integration with Block Explorers** ✔
+- Link transactions and addresses to block explorers for easy verification.
+
+### 20. **Modular Plugin System**
+- Allow users to add new automation modules (strategies, integrations) via plugins without modifying core code.

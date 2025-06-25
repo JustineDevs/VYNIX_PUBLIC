@@ -5,5 +5,12 @@
     "chainId": 688688,
     "currencySymbol": "PHRS",
     "explorer": "https://pharos-testnet.socialscan.io"
+  },
+  {
+    "name": "Monad Testnet",
+    "rpc": "https://testnet-rpc.monad.xyz",
+    "chainId": 10143,
+    "currencySymbol": "MON",
+    "explorer": "https://testnet.monadexplorer.com"
   }
 ]

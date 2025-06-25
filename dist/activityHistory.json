@@ -1,0 +1,280 @@
+[
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Transfer Settings",
+    "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:15:06.333Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Swap Settings",
+    "details": {
+      "intervalType": "random",
+      "minInterval": 30000,
+      "maxInterval": 60000,
+      "fixedInterval": 45000,
+      "useFixedAmount": true,
+      "swapAmount": 0.5
+    },
+    "timestamp": "2025-06-25T21:15:52.027Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Network Options",
+    "timestamp": "2025-06-25T21:16:00.915Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Token Options",
+    "timestamp": "2025-06-25T21:16:06.332Z"
+  },
+  {
+    "type": "swap",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.5,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0xf61aaa5822f3a9c69a8a05923098f78adf5de9b0ea39c2b825da4903cdec597c",
+    "timestamp": "2025-06-25T21:16:29.590Z"
+  },
+  {
+    "type": "transfer",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0xeb45d51424d6fa1c66ec0d890ce18f9a8d4e91ad0042e77a64113cfd903fdc04",
+    "timestamp": "2025-06-25T21:17:06.073Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.5,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:19:35.010Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.5,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:19:36.187Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.5,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:19:38.030Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.5,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:19:40.233Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.5,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:19:41.565Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.5,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:19:42.499Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.5,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:19:43.202Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.5,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:19:44.446Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Swap Settings",
+    "details": {
+      "intervalType": "random",
+      "minInterval": 30000,
+      "maxInterval": 60000,
+      "fixedInterval": 45000,
+      "useFixedAmount": false,
+      "swapAmount": 0.01
+    },
+    "timestamp": "2025-06-25T21:20:21.484Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Swap Settings",
+    "details": {
+      "intervalType": "random",
+      "minInterval": 30000,
+      "maxInterval": 60000,
+      "fixedInterval": 45000,
+      "useFixedAmount": true,
+      "swapAmount": 0.1,
+      "swapAmountRange": 5
+    },
+    "timestamp": "2025-06-25T21:23:14.978Z"
+  },
+  {
+    "type": "transfer",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "receiver": null,
+    "timestamp": "2025-06-25T21:23:51.794Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "USDT",
+    "to": "WPHRS",
+    "amount": 2.5230467767634512,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:23:58.005Z"
+  },
+  {
+    "type": "transfer",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "receiver": null,
+    "timestamp": "2025-06-25T21:23:58.006Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "USDT",
+    "to": "WPHRS",
+    "amount": 1.8191957549122493,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:23:58.612Z"
+  },
+  {
+    "type": "transfer",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "receiver": null,
+    "timestamp": "2025-06-25T21:23:58.614Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "USDT",
+    "to": "WPHRS",
+    "amount": 1.6121353144521424,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:24:00.339Z"
+  },
+  {
+    "type": "transfer",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "receiver": null,
+    "timestamp": "2025-06-25T21:24:00.340Z"
+  },
+  {
+    "type": "swap",
+    "status": "simulated",
+    "network": "Pharos Testnet",
+    "from": "USDT",
+    "to": "WPHRS",
+    "amount": 3.6973105327842517,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:24:01.383Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Transfer Amount",
+    "amount": 0.0001,
+    "amountRange": 0.1,
+    "timestamp": "2025-06-25T21:26:44.548Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Swap Settings",
+    "details": {
+      "intervalType": "random",
+      "minInterval": 30000,
+      "maxInterval": 60000,
+      "fixedInterval": 45000,
+      "useFixedAmount": false,
+      "swapAmount": 0.01,
+      "swapAmountRange": null
+    },
+    "timestamp": "2025-06-25T21:26:51.892Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Transfer Settings",
+    "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "timestamp": "2025-06-25T21:27:04.108Z"
+  },
+  {
+    "type": "swap",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.002204205543635316,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0xf50ffd849c344609b722d91254916ca1eef611cbe46a103b8da5d91a81f11318",
+    "timestamp": "2025-06-25T21:27:26.176Z"
+  },
+  {
+    "type": "transfer",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0x193d5e6db095aaf2458de18f9b93f870d0e7473153192026be5e0b6eca78b038",
+    "timestamp": "2025-06-25T21:27:35.678Z"
+  }
+]

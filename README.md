@@ -79,6 +79,8 @@
    npx tsc
    ```
 3. Run the bot:
+   Open a new Command Prompt window titled "**Testnet Automation Bot**"
+   Run your bot (```npx ts-node automate.ts```)
    ```sh
    node dist/automate.js
    ```

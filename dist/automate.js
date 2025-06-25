@@ -50,6 +50,7 @@ dotenv.config({ path: ENV_PATH });
 const NETWORKS_PATH = path_1.default.resolve(__dirname, "networks.json");
 const TOKENS_PATH = path_1.default.resolve(__dirname, "tokens.json");
 const SWAP_HISTORY_PATH = path_1.default.resolve(__dirname, "swapHistory.json");
+const ACTIVITY_HISTORY_PATH = path_1.default.resolve(__dirname, "activityHistory.json");
 const ERC20_ABI = [
     "function approve(address spender, uint256 amount) external returns (bool)",
     "function allowance(address owner, address spender) external view returns (uint256)",
@@ -248,7 +249,7 @@ async function promptAddToken(existingTokens = []) {
 function printBanner() {
     console.log(chalk_1.default.cyan(`\n==============================`));
     console.log(chalk_1.default.cyan(`      Testnet Automation Bot   `));
-    console.log(chalk_1.default.cyan(`  Pharos Testnet Swap Bot v1.0 `));
+    console.log(chalk_1.default.cyan(`    Bot v1.0 made by JustineDevs `));
     console.log(chalk_1.default.cyan(`==============================\n`));
 }
 // Logging helpers
@@ -360,6 +361,9 @@ let swapSettings = {
     minInterval: 30000,
     maxInterval: 60000,
     fixedInterval: 45000,
+    useFixedAmount: false,
+    swapAmount: 0.01,
+    swapAmountRange: null,
 };
 async function swapSettingsMenu() {
     while (true) {
@@ -371,6 +375,7 @@ async function swapSettingsMenu() {
                 choices: [
                     "Set Random Interval",
                     "Set Fixed Interval",
+                    "Set Swap Amount",
                     "Show Current Settings",
                     "Back to Main Menu"
                 ]
@@ -408,8 +413,40 @@ async function swapSettingsMenu() {
             swapSettings.fixedInterval = Number(fixedPrompt.fixed);
             log.success(`Fixed interval set: ${fixedPrompt.fixed}ms`);
         }
+        else if (swapAction === "Set Swap Amount") {
+            const { useFixed } = await inquirer_1.default.prompt({
+                type: "confirm",
+                name: "useFixed",
+                message: "Use a fixed swap amount for all swaps?",
+                default: swapSettings.useFixedAmount
+            });
+            swapSettings.useFixedAmount = useFixed;
+            if (useFixed) {
+                const { amount } = await inquirer_1.default.prompt({
+                    type: "input",
+                    name: "amount",
+                    message: "Enter main swap amount:",
+                    default: String(swapSettings.swapAmount),
+                    validate: (v) => !isNaN(Number(v)) && Number(v) > 0
+                });
+                const { amountRange } = await inquirer_1.default.prompt({
+                    type: "input",
+                    name: "amountRange",
+                    message: "Enter optional upper range for random swap amount (leave blank for fixed):",
+                    default: swapSettings.swapAmountRange !== null ? String(swapSettings.swapAmountRange) : "",
+                    validate: (v) => v === '' || (!isNaN(Number(v)) && Number(v) > 0)
+                });
+                swapSettings.swapAmount = Number(amount);
+                swapSettings.swapAmountRange = amountRange === '' ? null : Number(amountRange);
+                log.success(`Swap amount set: ${amount}${amountRange ? ` (random between ${amount} and ${amountRange})` : ''}`);
+            }
+            else {
+                log.success("Bot will use min/max or random swap amount as before.");
+            }
+        }
         else if (swapAction === "Show Current Settings") {
             log.step(`Current swap interval: ${swapSettings.intervalType === 'random' ? `${swapSettings.minInterval}ms - ${swapSettings.maxInterval}ms` : `${swapSettings.fixedInterval}ms`}`);
+            log.step(`Swap amount: ${swapSettings.useFixedAmount ? `Fixed at ${swapSettings.swapAmount}${swapSettings.swapAmountRange ? ` (random between ${swapSettings.swapAmount} and ${swapSettings.swapAmountRange})` : ''}` : 'Random/min/max per token'}`);
             await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
         }
         else if (swapAction === "Back to Main Menu") {
@@ -521,13 +558,14 @@ async function tokenOptionsMenu(tokens, networks) {
 }
 async function showInfoAndHistory(networks, tokens) {
     while (true) {
-        swapHistory = loadSwapHistory();
+        activityHistory = loadActivityHistory();
         const { histAction } = await inquirer_1.default.prompt([
             {
                 type: "list",
                 name: "histAction",
                 message: "Show Info & History:",
                 choices: [
+                    "All Activity",
                     "Network History",
                     "Token History",
                     "Swap History (ERC20)",
@@ -537,7 +575,31 @@ async function showInfoAndHistory(networks, tokens) {
                 ]
             }
         ]);
-        if (histAction === "Network History") {
+        if (histAction === "All Activity") {
+            log.step("All Activity (Settings, Swaps, Transfers, etc.):");
+            if (activityHistory.length === 0) {
+                console.log("  No activity yet.");
+            }
+            else {
+                activityHistory.slice(-50).forEach((a, i) => {
+                    const time = new Date(a.timestamp).toLocaleString();
+                    if (a.type === 'settings') {
+                        console.log(`  [${i}] [${time}] SETTINGS: ${a.setting} (${a.action}) ${a.receiver ? `Receiver: ${a.receiver}` : ''}`);
+                    }
+                    else if (a.type === 'swap') {
+                        console.log(`  [${i}] [${time}] SWAP: ${a.from} -> ${a.to} (${a.amount}) on ${a.network} [${a.status}]${a.txHash ? ` Tx: ${a.txHash}` : ''}`);
+                    }
+                    else if (a.type === 'transfer') {
+                        console.log(`  [${i}] [${time}] TRANSFER: to ${a.receiver} on ${a.network} [${a.status}]${a.txHash ? ` Tx: ${a.txHash}` : ''}`);
+                    }
+                    else {
+                        console.log(`  [${i}] [${time}] ${a.type.toUpperCase()}: ${JSON.stringify(a)}`);
+                    }
+                });
+            }
+            await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
+        }
+        else if (histAction === "Network History") {
             if (networks.length === 0) {
                 log.warn("No networks available.");
                 continue;
@@ -547,13 +609,28 @@ async function showInfoAndHistory(networks, tokens) {
             ]);
             if (idx === -1)
                 continue;
-            log.step(`Swap History for ${networks[idx].name}:`);
-            const filtered = swapHistory.filter(h => h.includes(networks[idx].name));
+            const selectedNetwork = networks[idx].name;
+            log.step(`Activity History for ${selectedNetwork}:`);
+            const filtered = activityHistory.filter(a => a.network === selectedNetwork);
             if (filtered.length === 0) {
-                console.log("  No swaps yet for this network.");
+                console.log("  No activity yet for this network.");
             }
             else {
-                filtered.slice(-10).forEach((h, i) => console.log(`  [${i}] ${h}`));
+                filtered.slice(-50).forEach((a, i) => {
+                    const time = new Date(a.timestamp).toLocaleString();
+                    if (a.type === 'settings') {
+                        console.log(`  [${i}] [${time}] SETTINGS: ${a.setting} (${a.action}) ${a.receiver ? `Receiver: ${a.receiver}` : ''}`);
+                    }
+                    else if (a.type === 'swap') {
+                        console.log(`  [${i}] [${time}] SWAP: ${a.from} -> ${a.to} (${a.amount}) on ${a.network} [${a.status}]${a.txHash ? ` Tx: ${a.txHash}` : ''}`);
+                    }
+                    else if (a.type === 'transfer') {
+                        console.log(`  [${i}] [${time}] TRANSFER: to ${a.receiver} on ${a.network} [${a.status}]${a.txHash ? ` Tx: ${a.txHash}` : ''}`);
+                    }
+                    else {
+                        console.log(`  [${i}] [${time}] ${a.type.toUpperCase()}: ${JSON.stringify(a)}`);
+                    }
+                });
             }
             await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
         }
@@ -655,13 +732,28 @@ async function networkOptionsMenu(networks, tokens) {
             ]);
             if (idx === -1)
                 continue;
-            log.step(`Swap History for ${networks[idx].name}:`);
-            const filtered = swapHistory.filter(h => h.network === networks[idx].name);
+            const selectedNetwork = networks[idx].name;
+            log.step(`Activity History for ${selectedNetwork}:`);
+            const filtered = activityHistory.filter(a => a.network === selectedNetwork);
             if (filtered.length === 0) {
-                console.log("  No swaps yet for this network.");
+                console.log("  No activity yet for this network.");
             }
             else {
-                filtered.slice(-10).forEach((h, i) => console.log(`  [${i}] [${h.status ? h.status.toUpperCase() : ''}] ${h.message}${h.status && h.status !== 'success' ? ' Reason: ' + h.reason : ''}`));
+                filtered.slice(-50).forEach((a, i) => {
+                    const time = new Date(a.timestamp).toLocaleString();
+                    if (a.type === 'settings') {
+                        console.log(`  [${i}] [${time}] SETTINGS: ${a.setting} (${a.action}) ${a.receiver ? `Receiver: ${a.receiver}` : ''}`);
+                    }
+                    else if (a.type === 'swap') {
+                        console.log(`  [${i}] [${time}] SWAP: ${a.from} -> ${a.to} (${a.amount}) on ${a.network} [${a.status}]${a.txHash ? ` Tx: ${a.txHash}` : ''}`);
+                    }
+                    else if (a.type === 'transfer') {
+                        console.log(`  [${i}] [${time}] TRANSFER: to ${a.receiver} on ${a.network} [${a.status}]${a.txHash ? ` Tx: ${a.txHash}` : ''}`);
+                    }
+                    else {
+                        console.log(`  [${i}] [${time}] ${a.type.toUpperCase()}: ${JSON.stringify(a)}`);
+                    }
+                });
             }
             await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
         }
@@ -681,6 +773,12 @@ const DEFAULT_FUNCTIONS = ["Swap", "Liquidity", "Transfer", "Faucet", "Deploy", 
 function getNetworkFunctions(networkName) {
     return NETWORK_FUNCTIONS[networkName] || DEFAULT_FUNCTIONS;
 }
+// Track last swap pair and direction
+let lastSwap = {
+    from: null,
+    to: null,
+    direction: null,
+};
 // --- Extracted function for Swap ---
 async function runSwap({ net, tokens, provider, privateKeys, walletIndex, simulationMode, log, contractExists, toFixedDecimals, ethers, swapCount, swapHistory }) {
     // Router contract
@@ -696,21 +794,72 @@ async function runSwap({ net, tokens, provider, privateKeys, walletIndex, simula
         if (exists)
             validTokens.push(token);
     }
-    if (validTokens.length === 0) {
-        log.error(`No valid token contracts found on ${net.name}. Skipping swap.`);
-        return { status: 'skipped', reason: 'No valid tokens' };
+    if (validTokens.length < 2) {
+        log.error(`Not enough valid token contracts found on ${net.name}. Skipping swap.`);
+        return { status: 'skipped', reason: 'Not enough valid tokens' };
     }
     const wallet = new ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
     walletIndex++;
-    const token = validTokens[Math.floor(Math.random() * validTokens.length)];
-    const min = token.min || 0.001, max = token.max || 0.01;
-    const amount = Math.floor((Math.random() * (max - min) + min) * Math.pow(10, token.decimals)) / Math.pow(10, token.decimals);
-    const amountWei = ethers.parseUnits(toFixedDecimals(amount, token.decimals), token.decimals);
+    // Try all possible pairs for sufficient balance
+    let pairFound = false;
+    let fromToken = null, toToken = null, direction = null;
+    let amount = 0;
+    let triedPairs = new Set();
+    let pairList = [];
+    // Build all possible pairs (A->B and B->A for each unique pair)
+    for (let i = 0; i < validTokens.length; i++) {
+        for (let j = 0; j < validTokens.length; j++) {
+            if (i !== j) {
+                pairList.push([validTokens[i], validTokens[j], 'AtoB']);
+                pairList.push([validTokens[j], validTokens[i], 'BtoA']);
+            }
+        }
+    }
+    // Try lastSwap first if available
+    if (lastSwap.from && lastSwap.to && lastSwap.direction) {
+        const tA = validTokens.find(t => t.symbol === lastSwap.from);
+        const tB = validTokens.find(t => t.symbol === lastSwap.to);
+        if (tA && tB) {
+            pairList.unshift([tA, tB, lastSwap.direction]);
+        }
+    }
+    for (const [fToken, tToken, dir] of pairList) {
+        const fromBalance = await getTokenBalance(fToken, wallet.address, provider, ethers);
+        if (swapSettings.useFixedAmount) {
+            if (swapSettings.swapAmountRange && swapSettings.swapAmountRange > swapSettings.swapAmount) {
+                amount = Math.random() * (swapSettings.swapAmountRange - swapSettings.swapAmount) + swapSettings.swapAmount;
+                amount = Math.floor(amount * Math.pow(10, fToken.decimals)) / Math.pow(10, fToken.decimals);
+            }
+            else {
+                amount = swapSettings.swapAmount;
+            }
+        }
+        else {
+            const min = fToken.min || 0.001, max = fToken.max || 0.01;
+            amount = Math.floor((Math.random() * (max - min) + min) * Math.pow(10, fToken.decimals)) / Math.pow(10, fToken.decimals);
+        }
+        if (fromBalance >= amount) {
+            fromToken = fToken;
+            toToken = tToken;
+            direction = dir;
+            pairFound = true;
+            break;
+        }
+        triedPairs.add(`${fToken.symbol}->${tToken.symbol}`);
+    }
+    if (!pairFound) {
+        log.warn('No swap pairs with sufficient balance found. Skipping swap.');
+        return { status: 'skipped', reason: 'Insufficient balance for all pairs' };
+    }
+    const amountWei = ethers.parseUnits(toFixedDecimals(amount, fromToken.decimals), fromToken.decimals);
     const deadline = Math.floor(Date.now() / 1000) + 60 * 10;
     const swapData = [];
-    log.step(`Preparing to swap ${amount} ${token.symbol} on ${net.name} using wallet ${wallet.address}`);
+    log.step(`Preparing to swap ${amount} ${fromToken.symbol} to ${toToken.symbol} on ${net.name} using wallet ${wallet.address}`);
     if (simulationMode) {
-        log.info(`[SIMULATION] Would perform: Swap ${amount} ${token.symbol} on ${net.name} using wallet ${wallet.address}`);
+        log.info(`[SIMULATION] Would perform: Swap ${amount} ${fromToken.symbol} to ${toToken.symbol} on ${net.name} using wallet ${wallet.address}`);
+        // Update lastSwap
+        lastSwap = { from: fromToken.symbol, to: toToken.symbol, direction };
+        logActivity({ type: 'swap', status: 'simulated', network: net.name, from: fromToken.symbol, to: toToken.symbol, amount, wallet: wallet.address });
         return { status: 'simulated' };
     }
     try {
@@ -720,9 +869,10 @@ async function runSwap({ net, tokens, provider, privateKeys, walletIndex, simula
         const receipt = await tx.wait();
         if (receipt.status === 1) {
             swapCount++;
-            log.success(`Swap #${swapCount} for ${token.symbol} on ${net.name} complete!`);
+            log.success(`Swap #${swapCount} for ${fromToken.symbol} to ${toToken.symbol} on ${net.name} complete!`);
             log.success(`Tx Hash: ${receipt.hash}`);
             swapHistory.push({ status: 'success', txHash: receipt.hash, type: 'Swap', network: net.name });
+            logActivity({ type: 'swap', status: 'success', network: net.name, from: fromToken.symbol, to: toToken.symbol, amount, wallet: wallet.address, txHash: receipt.hash });
             return { status: 'success', txHash: receipt.hash };
         }
         else {
@@ -735,32 +885,71 @@ async function runSwap({ net, tokens, provider, privateKeys, walletIndex, simula
         return { status: 'error', reason: err.message };
     }
 }
+function pickRandomPair(tokens) {
+    if (tokens.length < 2)
+        throw new Error('Need at least 2 tokens');
+    let idxA = Math.floor(Math.random() * tokens.length);
+    let idxB;
+    do {
+        idxB = Math.floor(Math.random() * tokens.length);
+    } while (idxB === idxA);
+    return [tokens[idxA], tokens[idxB]];
+}
+async function getTokenBalance(token, address, provider, ethers) {
+    const erc20 = new ethers.Contract(token.address, ["function balanceOf(address) view returns (uint256)"], provider);
+    const bal = await erc20.balanceOf(address);
+    return Number(ethers.formatUnits(bal, token.decimals));
+}
 // --- Extracted function for Transfer ---
 async function runTransfer({ net, provider, privateKeys, walletIndex, simulationMode, log, receiver }) {
     // For demo, just simulate or prompt for address
     if (simulationMode) {
         log.info("[SIMULATION] Would perform: Transfer PHRS");
+        logActivity({ type: 'transfer', status: 'simulated', network: net.name, receiver });
         return { status: 'simulated' };
     }
     let toAddress = receiver;
     if (!toAddress) {
-        // Prompt for receiver address only if not provided
-        const input = await inquirer_1.default.prompt([
+        const prompt = await inquirer_1.default.prompt([
             { type: "input", name: "toAddress", message: "Enter the receiver address for PHRS transfer (or leave blank to skip):" }
         ]);
-        toAddress = input.toAddress;
-        if (!toAddress)
-            return { status: 'skipped', reason: 'No address provided' };
+        toAddress = prompt.toAddress;
+    }
+    if (!toAddress) {
+        const { stop } = await inquirer_1.default.prompt([
+            { type: "confirm", name: "stop", message: "No receiver address provided. Do you want to stop the bot?", default: false }
+        ]);
+        if (stop) {
+            automationActive = false;
+            return { status: 'stopped', reason: 'User stopped bot' };
+        }
+        return { status: 'skipped', reason: 'No address provided' };
     }
     const wallet = new ethers_1.ethers.Wallet(privateKeys[walletIndex % privateKeys.length], provider);
     walletIndex++;
-    const amount = 0.000001;
+    let amount = 0.000001;
+    if (globalTransferAmount !== null) {
+        if (globalTransferAmountRange && globalTransferAmountRange > globalTransferAmount) {
+            amount = Math.random() * (globalTransferAmountRange - globalTransferAmount) + globalTransferAmount;
+            amount = Math.floor(amount * 1e6) / 1e6; // 6 decimals for PHRS
+        }
+        else {
+            amount = globalTransferAmount;
+        }
+    }
     try {
         log.step(`Preparing PHRS transfer: ${amount} PHRS to ${toAddress}`);
         const balance = await provider.getBalance(wallet.address);
         const required = ethers_1.ethers.parseEther(amount.toString());
         if (balance < required) {
             log.warn(`Skipping transfer: Insufficient PHRS balance: ${ethers_1.ethers.formatEther(balance)} < ${amount}`);
+            const { stop } = await inquirer_1.default.prompt([
+                { type: "confirm", name: "stop", message: "Insufficient balance. Do you want to stop the bot?", default: false }
+            ]);
+            if (stop) {
+                automationActive = false;
+                return { status: 'stopped', reason: 'User stopped bot' };
+            }
             return { status: 'skipped', reason: 'Insufficient balance' };
         }
         const feeData = await provider.getFeeData();
@@ -777,10 +966,18 @@ async function runTransfer({ net, provider, privateKeys, walletIndex, simulation
         const receipt = await provider.waitForTransaction(tx.hash);
         log.success(`Transfer completed: ${receipt.hash}`);
         log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${receipt.hash}`);
+        logActivity({ type: 'transfer', status: 'success', network: net.name, receiver: toAddress, txHash: receipt.hash });
         return { status: 'success', txHash: receipt.hash };
     }
     catch (error) {
         log.error(`Transfer failed: ${error.message}`);
+        const { stop } = await inquirer_1.default.prompt([
+            { type: "confirm", name: "stop", message: "Transfer failed. Do you want to stop the bot?", default: false }
+        ]);
+        if (stop) {
+            automationActive = false;
+            return { status: 'stopped', reason: 'User stopped bot' };
+        }
         return { status: 'error', reason: error.message };
     }
 }
@@ -1142,6 +1339,49 @@ async function customContractMenu(networks, tokens, wallet, provider) {
 function toFixedDecimals(amount, decimals) {
     return amount.toFixed(decimals);
 }
+let autoTokenApprovalEnabled = true;
+async function profitLossTrackingMenu() {
+    log.info("Profit/Loss Tracking feature coming soon!");
+    log.info("Recommended: Track all swaps and transfers, calculate net profit/loss per token and overall, and display a summary here.");
+    await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
+}
+async function automaticTokenApprovalMenu() {
+    while (true) {
+        log.info(`Automatic Token Approval is currently ${autoTokenApprovalEnabled ? 'ENABLED' : 'DISABLED'}`);
+        const { action } = await inquirer_1.default.prompt([
+            {
+                type: "list",
+                name: "action",
+                message: "Automatic Token Approval Options:",
+                choices: [
+                    autoTokenApprovalEnabled ? "Disable" : "Enable",
+                    "Show Recommendations",
+                    "Back"
+                ]
+            }
+        ]);
+        if (action === "Enable") {
+            autoTokenApprovalEnabled = true;
+            log.success("Automatic Token Approval enabled.");
+        }
+        else if (action === "Disable") {
+            autoTokenApprovalEnabled = false;
+            log.success("Automatic Token Approval disabled.");
+        }
+        else if (action === "Show Recommendations") {
+            log.info("Recommended: Add per-token approval status, auto-approve on swap/transfer, and show approval history here.");
+            await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
+        }
+        else if (action === "Back") {
+            break;
+        }
+    }
+}
+async function healthChecksMenu() {
+    log.info("Health Checks & Self-Healing feature coming soon!");
+    log.info("Recommended: Check RPC/network status, auto-retry failed operations, and alert on persistent issues. Add self-healing logic to auto-recover from common errors.");
+    await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
+}
 async function mainMenu(networks, tokens, privateKey) {
     while (true) {
         const { action } = await inquirer_1.default.prompt([
@@ -1152,14 +1392,14 @@ async function mainMenu(networks, tokens, privateKey) {
                 choices: [
                     new inquirer_1.default.Separator("= Automation ="),
                     "Start Automation",
-                    new inquirer_1.default.Separator("= Network & Tokens ="),
-                    "Network Options",
-                    "Token Options",
-                    "Swap Settings",
+                    new inquirer_1.default.Separator("= Settings ="),
+                    "Modify Settings",
+                    new inquirer_1.default.Separator("= Advanced Features ="),
+                    "Profit/Loss Tracking",
+                    "Automatic Token Approval",
+                    "Health Checks & Self-Healing",
                     new inquirer_1.default.Separator("= Info ="),
                     "Show Info & History",
-                    new inquirer_1.default.Separator("= Contracts ="),
-                    "Deploy Options",
                     new inquirer_1.default.Separator("= Other ="),
                     "Other",
                     "Exit"
@@ -1169,20 +1409,20 @@ async function mainMenu(networks, tokens, privateKey) {
         if (action === "Start Automation") {
             await startAutomationMenu(networks, tokens);
         }
-        else if (action === "Network Options") {
-            await networkOptionsMenu(networks, tokens);
+        else if (action === "Modify Settings") {
+            await modifySettingsMenu(networks, tokens, privateKey);
         }
-        else if (action === "Token Options") {
-            await tokenOptionsMenu(tokens, networks);
+        else if (action === "Profit/Loss Tracking") {
+            await profitLossTrackingMenu();
         }
-        else if (action === "Swap Settings") {
-            await swapSettingsMenu();
+        else if (action === "Automatic Token Approval") {
+            await automaticTokenApprovalMenu();
+        }
+        else if (action === "Health Checks & Self-Healing") {
+            await healthChecksMenu();
         }
         else if (action === "Show Info & History") {
             await showInfoAndHistory(networks, tokens);
-        }
-        else if (action === "Deploy Options") {
-            await deployOptionsMenu(networks, tokens, privateKey);
         }
         else if (action === "Other") {
             await otherMenu();
@@ -1190,6 +1430,97 @@ async function mainMenu(networks, tokens, privateKey) {
         else if (action === "Exit") {
             log.warn("Exiting bot.");
             process.exit(0);
+        }
+    }
+}
+async function modifySettingsMenu(networks, tokens, privateKey) {
+    while (true) {
+        const { setting } = await inquirer_1.default.prompt([
+            {
+                type: "list",
+                name: "setting",
+                message: "Modify Settings:",
+                choices: [
+                    "Swap Settings",
+                    "Transfer Settings",
+                    "Liquidity Settings",
+                    "Network Options",
+                    "Token Options",
+                    "Deploy Options",
+                    "Back to Main Menu"
+                ]
+            }
+        ]);
+        if (setting === "Swap Settings") {
+            await swapSettingsMenu();
+            log.info("Recommended: You can add slippage, max gas, swap direction, and more in future updates.");
+            logActivity({ type: 'settings', action: 'modify', setting: 'Swap Settings', details: { ...swapSettings } });
+        }
+        else if (setting === "Transfer Settings") {
+            await transferSettingsMenu();
+        }
+        else if (setting === "Liquidity Settings") {
+            log.info("Liquidity settings are not yet implemented. Recommended: Add min/max liquidity, auto-withdraw, and alerts in future updates.");
+            logActivity({ type: 'settings', action: 'view', setting: 'Liquidity Settings' });
+            await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
+        }
+        else if (setting === "Network Options") {
+            await networkOptionsMenu(networks, tokens);
+            log.info("Recommended: Add network priority, auto-switch, and RPC health checks in future updates.");
+            logActivity({ type: 'settings', action: 'modify', setting: 'Network Options' });
+        }
+        else if (setting === "Token Options") {
+            await tokenOptionsMenu(tokens, networks);
+            log.info("Recommended: Add token sorting, favorite tokens, and auto-approve in future updates.");
+            logActivity({ type: 'settings', action: 'modify', setting: 'Token Options' });
+        }
+        else if (setting === "Deploy Options") {
+            await deployOptionsMenu(networks, tokens, privateKey);
+            log.info("Recommended: Add contract verification, upgradeability, and deployment history in future updates.");
+            logActivity({ type: 'settings', action: 'modify', setting: 'Deploy Options' });
+        }
+        else if (setting === "Back to Main Menu") {
+            break;
+        }
+    }
+}
+// Transfer Settings menu (now with amount and range)
+async function transferSettingsMenu() {
+    while (true) {
+        const { transferSetting } = await inquirer_1.default.prompt([
+            {
+                type: "list",
+                name: "transferSetting",
+                message: "Transfer Settings:",
+                choices: [
+                    "Set Default Receiver Address",
+                    "Set Transfer Amount & Range",
+                    "Back"
+                ]
+            }
+        ]);
+        if (transferSetting === "Set Default Receiver Address") {
+            const { receiver } = await inquirer_1.default.prompt([
+                { type: "input", name: "receiver", message: "Enter default receiver address (leave blank to clear):" }
+            ]);
+            globalTransferReceiver = receiver || null;
+            log.success(receiver ? `Default receiver set: ${receiver}` : "Default receiver cleared.");
+            logActivity({ type: 'settings', action: 'modify', setting: 'Transfer Settings', receiver });
+        }
+        else if (transferSetting === "Set Transfer Amount & Range") {
+            const { amount } = await inquirer_1.default.prompt([
+                { type: "input", name: "amount", message: "Enter main transfer amount:", default: globalTransferAmount !== null ? String(globalTransferAmount) : "0.000001", validate: (v) => !isNaN(Number(v)) && Number(v) > 0 }
+            ]);
+            const { amountRange } = await inquirer_1.default.prompt([
+                { type: "input", name: "amountRange", message: "Enter optional upper range for random transfer amount (leave blank for fixed):", default: globalTransferAmountRange !== null ? String(globalTransferAmountRange) : "", validate: (v) => v === '' || (!isNaN(Number(v)) && Number(v) > 0) }
+            ]);
+            globalTransferAmount = Number(amount);
+            globalTransferAmountRange = amountRange === '' ? null : Number(amountRange);
+            log.success(`Transfer amount set: ${amount}${amountRange ? ` (random between ${amount} and ${amountRange})` : ''}`);
+            logActivity({ type: 'settings', action: 'modify', setting: 'Transfer Amount', amount: globalTransferAmount, amountRange: globalTransferAmountRange });
+        }
+        else if (transferSetting === "Back") {
+            break;
         }
     }
 }
@@ -1262,6 +1593,8 @@ async function deployOptionsMenu(networks, tokens, privateKey) {
 }
 // In automationLoop, add logic to prompt for transfer receiver before running all functions
 let globalTransferReceiver = null;
+let globalTransferAmount = null;
+let globalTransferAmountRange = null;
 async function automationLoop(selectedNetworks, tokens, networkFunctionMap) {
     automationActive = true;
     let swapCount = 0, transferCount = 0, faucetCount = 0, deployCount = 0, checkinCount = 0, liquidityCount = 0;
@@ -1270,7 +1603,6 @@ async function automationLoop(selectedNetworks, tokens, networkFunctionMap) {
     let walletIndex = 0;
     log.success("Automation started! Press Ctrl+C to stop and return to menu.");
     let stopRequested = false;
-    let returnToStartAutomation = false;
     process.on("SIGINT", async () => {
         if (automationActive && !stopRequested) {
             stopRequested = true;
@@ -1278,9 +1610,8 @@ async function automationLoop(selectedNetworks, tokens, networkFunctionMap) {
                 { type: "confirm", name: "confirmStop", message: "Are you sure you want to stop automation?", default: true }
             ]);
             if (confirmStop) {
-                log.warn("\nAutomation stopped. Returning to Start Automation menu...");
+                log.warn("\nAutomation stopped. Returning to menu...");
                 automationActive = false;
-                returnToStartAutomation = true;
             }
             else {
                 stopRequested = false;
@@ -1293,6 +1624,12 @@ async function automationLoop(selectedNetworks, tokens, networkFunctionMap) {
         let selectedFuncs = networkFunctionMap ? networkFunctionMap[net.name] : ["Swap"];
         if (selectedFuncs.includes("Run all functions")) {
             selectedFuncs = getNetworkFunctions(net.name).filter(f => f !== "Run all functions");
+        }
+        // If only Liquidity is selected, return to main menu
+        if (selectedFuncs.length === 1 && selectedFuncs[0] === "Liquidity") {
+            log.warn("Liquidity function is not implemented yet. Returning to main menu.");
+            automationActive = false;
+            return;
         }
         if (selectedFuncs.length === 6 &&
             selectedFuncs.includes("Swap") &&
@@ -1317,6 +1654,12 @@ async function automationLoop(selectedNetworks, tokens, networkFunctionMap) {
             if (selectedFuncs.includes("Run all functions")) {
                 selectedFuncs = getNetworkFunctions(net.name).filter(f => f !== "Run all functions");
             }
+            // If only Liquidity is selected, return to main menu
+            if (selectedFuncs.length === 1 && selectedFuncs[0] === "Liquidity") {
+                log.warn("Liquidity function is not implemented yet. Returning to main menu.");
+                automationActive = false;
+                return;
+            }
             if (!selectedFuncs || selectedFuncs.length === 0)
                 continue;
             const provider = new ethers_1.ethers.JsonRpcProvider(net.rpc, net.chainId);
@@ -1332,8 +1675,8 @@ async function automationLoop(selectedNetworks, tokens, networkFunctionMap) {
                 // SWAP
                 let swapResult = await runSwap({ net, tokens, provider, privateKeys, walletIndex, simulationMode, log, contractExists, toFixedDecimals, ethers: ethers_1.ethers, swapCount, swapHistory });
                 summary.push({ function: 'Swap', ...swapResult });
-                // LIQUIDITY
-                log.warn("Liquidity function is not yet implemented.");
+                // LIQUIDITY (skip, just log)
+                log.warn('This function is not implemented yet. Skipping Liquidity.');
                 summary.push({ function: 'Liquidity', status: 'skipped', reason: 'Not implemented' });
                 // TRANSFER
                 let transferResult = await runTransfer({ net, provider, privateKeys, walletIndex, simulationMode, log, receiver: globalTransferReceiver });
@@ -1380,8 +1723,8 @@ async function automationLoop(selectedNetworks, tokens, networkFunctionMap) {
                     }
                 }
                 else if (func === "Liquidity") {
-                    // Liquidity logic is currently disabled. To be implemented soon.
-                    log.step("(Stub) Liquidity function is not yet implemented.");
+                    log.warn('This function is not implemented yet. Please go back.');
+                    automationActive = false;
                     return;
                 }
                 else if (func === "Transfer") {
@@ -1440,10 +1783,6 @@ async function automationLoop(selectedNetworks, tokens, networkFunctionMap) {
         }
         if (!automationActive)
             break;
-    }
-    // If user stopped automation and returnToStartAutomation is set, go back to Start Automation menu
-    if (returnToStartAutomation) {
-        await startAutomationMenu(selectedNetworks, tokens);
     }
 }
 async function deployedContractsMenu(wallet, provider) {
@@ -1531,6 +1870,25 @@ async function deployedContractsMenu(wallet, provider) {
             }
         }
     }
+}
+function loadActivityHistory() {
+    if (fs_1.default.existsSync(ACTIVITY_HISTORY_PATH)) {
+        try {
+            return JSON.parse(fs_1.default.readFileSync(ACTIVITY_HISTORY_PATH, "utf-8"));
+        }
+        catch {
+            return [];
+        }
+    }
+    return [];
+}
+function saveActivityHistory(history) {
+    fs_1.default.writeFileSync(ACTIVITY_HISTORY_PATH, JSON.stringify(history, null, 2));
+}
+let activityHistory = loadActivityHistory();
+function logActivity(entry) {
+    activityHistory.push({ ...entry, timestamp: new Date().toISOString() });
+    saveActivityHistory(activityHistory);
 }
 async function main() {
     // Setup .env and private keys

@@ -1,0 +1,9 @@
+[
+  {
+    "name": "Pharos Testnet",
+    "rpc": "https://testnet.dplabs-internal.com",
+    "chainId": 688688,
+    "currencySymbol": "PHRS",
+    "explorer": "https://testnet.pharosscan.xyz"
+  }
+]

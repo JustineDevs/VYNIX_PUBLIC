@@ -1,0 +1,22 @@
+{
+  "ERC20": {
+    "address": "0x92615dB0ca6412b5999B782cE46E90eBCB6F8303",
+    "name": "Word10 Word157",
+    "symbol": "WORWOR",
+    "initialSupply": "1000000000000000000000000"
+  },
+  "ERC1155": {
+    "address": "0x25607D592744433442715b76727AC10FC8a589D2",
+    "name": "Year Word151",
+    "uri": "https://example.com/api/item/{id}.json"
+  },
+  "ERC165": {
+    "address": "0x600e4D561e7C66De01d40A7f4A32F0eb446A5A86",
+    "description": "Word211 Word119 Word16"
+  },
+  "Uniswap": {
+    "address": "0x8De6d00189B40f9A0bBA2fda51600F901a422a2F",
+    "tokenA": "0xAD902CF99C2dE2f1Ba5ec4D642Fd7E49cae9EE37",
+    "tokenB": "0x72df0bcd7276f2dFbAc900D1CE63c272C4BCcCED"
+  }
+}
