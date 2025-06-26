@@ -9,9 +9,22 @@ import path from "path";
 import { abi as nfpmAbi } from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json';
 import axios from "axios";
 
-const ENV_PATH = path.resolve(__dirname, "env");
-// Load environment variables
-dotenv.config({ path: ENV_PATH });
+const ENV_PATH = path.resolve(__dirname, ".env");
+const ENV_EXAMPLE_PATH = path.resolve(__dirname, "env.example");
+// Robust dotenv loading: try both script dir and project root
+(function robustDotenvLoad() {
+  const scriptEnv = path.resolve(__dirname, ".env");
+  const rootEnv = path.resolve(process.cwd(), ".env");
+  if (fs.existsSync(scriptEnv)) {
+    dotenv.config({ path: scriptEnv });
+    console.log(`Loaded .env from: ${scriptEnv}`);
+  } else if (fs.existsSync(rootEnv)) {
+    dotenv.config({ path: rootEnv });
+    console.log(`Loaded .env from: ${rootEnv}`);
+  } else {
+    console.log("No .env file found in script or project root.");
+  }
+})();
 
 const NETWORKS_PATH = path.resolve(__dirname, "networks.json");
 const TOKENS_PATH = path.resolve(__dirname, "tokens.json");
@@ -54,6 +67,69 @@ const DEPLOYED_ADDRESSES = {
   ERC165: "0x6A32308EF415682543883Ec598dBfA78c9488771"
 };
 
+// Helper to validate private key format and checksum
+function validatePrivateKey(privateKey: string): { isValid: boolean; error?: string } {
+  // Check if it starts with 0x
+  if (!privateKey.startsWith('0x')) {
+    return { isValid: false, error: "Private key must start with '0x'" };
+  }
+  
+  // Check if it's exactly 66 characters (0x + 64 hex chars)
+  if (privateKey.length !== 66) {
+    return { isValid: false, error: "Private key must be exactly 64 hexadecimal characters after '0x'" };
+  }
+  
+  // Check if it contains only valid hexadecimal characters
+  const hexRegex = /^0x[0-9a-fA-F]{64}$/;
+  if (!hexRegex.test(privateKey)) {
+    return { isValid: false, error: "Private key contains invalid characters. Only hexadecimal (0-9, a-f, A-F) allowed" };
+  }
+  
+  // Check if it's not all zeros (common invalid key)
+  if (privateKey === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+    return { isValid: false, error: "Private key cannot be all zeros" };
+  }
+  
+  // Check if it's not the example key from env.example
+  if (privateKey === '0x0000000000000000000000000000000000000000000000000000000000000000') {
+    return { isValid: false, error: "Please replace the example private key with your actual private key" };
+  }
+  
+  return { isValid: true };
+}
+
+// Helper to copy env.example to .env
+async function copyEnvExampleToEnv(): Promise<boolean> {
+  try {
+    if (!fs.existsSync(ENV_EXAMPLE_PATH)) {
+      console.log(chalk.red("❌ env.example file not found!"));
+      return false;
+    }
+    
+    if (fs.existsSync(ENV_PATH)) {
+      const { overwrite } = await inquirer.prompt([
+        { 
+          type: "confirm", 
+          name: "overwrite", 
+          message: "A .env file already exists. Do you want to overwrite it?", 
+          default: false 
+        }
+      ]);
+      if (!overwrite) {
+        console.log(chalk.yellow("⚠️  Keeping existing .env file"));
+        return true;
+      }
+    }
+    
+    fs.copyFileSync(ENV_EXAMPLE_PATH, ENV_PATH);
+    console.log(chalk.green("✅ Successfully copied env.example to .env"));
+    return true;
+  } catch (error) {
+    console.log(chalk.red(`❌ Error copying env.example to .env: ${error}`));
+    return false;
+  }
+}
+
 // Helper to write .env (now supports multiple keys)
 function saveEnv(vars: Record<string, string | undefined>) {
   // Always write PRIVATE_KEY first if present, then PRIVATE_KEY1,2,...
@@ -77,54 +153,350 @@ function saveEnv(vars: Record<string, string | undefined>) {
 function loadPrivateKeysFromEnv(): string[] {
   const keys: string[] = [];
   Object.entries(process.env).forEach(([k, v]) => {
-    if ((k === "PRIVATE_KEY" || /^PRIVATE_KEY\d+$/.test(k)) && v && v.startsWith("0x")) keys.push(v);
+    if ((k === "PRIVATE_KEY" || /^PRIVATE_KEY\d+$/.test(k)) && v && v.startsWith("0x")) {
+      const validation = validatePrivateKey(v);
+      if (validation.isValid) {
+        keys.push(v);
+      } else {
+        console.log(chalk.yellow(`⚠️  Skipping invalid private key ${k}: ${validation.error}`));
+      }
+    }
   });
   return keys;
+}
+
+// Add global variables to track all available wallets and their balances
+let allWallets: Array<{privateKey: string, address: string, balance: bigint, hasBalance: boolean}> = [];
+let currentWalletIndex = 0;
+
+// Function to initialize all wallets from private keys
+async function initializeWallets(provider: ethers.JsonRpcProvider): Promise<void> {
+  const privateKeys = loadPrivateKeysFromEnv();
+  allWallets = [];
+  
+  for (const pk of privateKeys) {
+    try {
+      const wallet = new ethers.Wallet(pk, provider);
+      const balance = await provider.getBalance(wallet.address);
+      const hasBalance = balance > ethers.parseEther("0.0001"); // Minimum balance threshold
+      
+      allWallets.push({
+        privateKey: pk,
+        address: wallet.address,
+        balance: balance,
+        hasBalance: hasBalance
+      });
+      
+      console.log(chalk.cyan(`📊 Wallet ${wallet.address.substring(0, 6)}...${wallet.address.substring(wallet.address.length - 4)}: ${ethers.formatEther(balance)} ETH ${hasBalance ? '✅' : '❌'}`));
+    } catch (error) {
+      console.log(chalk.red(`❌ Failed to initialize wallet: ${error}`));
+    }
+  }
+  
+  const walletsWithBalance = allWallets.filter(w => w.hasBalance);
+  console.log(chalk.green(`\n✅ Initialized ${allWallets.length} wallets, ${walletsWithBalance.length} have sufficient balance`));
+}
+
+// Function to get next available wallet with balance
+function getNextWalletWithBalance(): {privateKey: string, address: string} | null {
+  const walletsWithBalance = allWallets.filter(w => w.hasBalance);
+  if (walletsWithBalance.length === 0) {
+    return null;
+  }
+  
+  const wallet = walletsWithBalance[currentWalletIndex % walletsWithBalance.length];
+  currentWalletIndex = (currentWalletIndex + 1) % walletsWithBalance.length;
+  return { privateKey: wallet.privateKey, address: wallet.address };
+}
+
+// Function to update wallet balance after transactions
+async function updateWalletBalance(address: string, provider: ethers.JsonRpcProvider): Promise<void> {
+  const walletIndex = allWallets.findIndex(w => w.address === address);
+  if (walletIndex !== -1) {
+    try {
+      const balance = await provider.getBalance(address);
+      allWallets[walletIndex].balance = balance;
+      allWallets[walletIndex].hasBalance = balance > ethers.parseEther("0.0001");
+    } catch (error) {
+      console.log(chalk.red(`❌ Failed to update balance for ${address}: ${error}`));
+    }
+  }
 }
 
 // New: Prompt for .env creation and private key import
 async function setupEnvAndKeys() {
   let envVars: Record<string, string> = {};
-  if (!fs.existsSync(ENV_PATH)) {
+
+  // Check for .env existence and reload if needed
+  const scriptEnv = path.resolve(__dirname, ".env");
+  const rootEnv = path.resolve(process.cwd(), ".env");
+  let envExists = fs.existsSync(scriptEnv) || fs.existsSync(rootEnv);
+  if (!envExists) {
+    // Prompt to create .env if not found
     const { createEnv } = await inquirer.prompt([
-      { type: "confirm", name: "createEnv", message: "Do you want the bot to create a .env file for you?", default: true }
+      { type: "confirm", name: "createEnv", message: "No .env file found. Do you want the bot to create a .env file for you?", default: true }
     ]);
     if (createEnv) {
-      const { keyMode } = await inquirer.prompt([
-        { type: "list", name: "keyMode", message: "Import a single private key or multiple?", choices: ["Single", "Multiple"] }
-      ]);
-      let keys: string[] = [];
-      if (keyMode === "Single") {
-        const { pk } = await inquirer.prompt([
-          { type: "password", name: "pk", message: "Enter your private key:", mask: "*", validate: (input: string) => /^0x[0-9a-fA-F]{64}$/.test(input) || "Invalid private key format!" }
-        ]);
-        keys = [pk];
-      } else {
-        let addMore = true;
-        while (addMore) {
-          const { pk } = await inquirer.prompt([
-            { type: "password", name: "pk", message: `Enter private key #${keys.length + 1}:`, mask: "*", validate: (input: string) => /^0x[0-9a-fA-F]{64}$/.test(input) || "Invalid private key format!" }
-          ]);
-          keys.push(pk);
-          const { more } = await inquirer.prompt([
-            { type: "confirm", name: "more", message: "Add another private key?", default: false }
-          ]);
-          addMore = more;
+      const { envMethod } = await inquirer.prompt([
+        {
+          type: "list",
+          name: "envMethod",
+          message: "How would you like to create the .env file?",
+          choices: [
+            { name: "Copy from env.example (recommended)", value: "copy" },
+            { name: "Create manually with private keys", value: "manual" }
+          ]
         }
+      ]);
+      if (envMethod === "copy") {
+        if (await copyEnvExampleToEnv()) {
+          console.log(chalk.cyan("\n📝 Please edit the .env file with your actual private keys:"));
+          console.log(chalk.cyan("   - Replace the example keys (0x0000...) with your real private keys"));
+          console.log(chalk.cyan("   - Make sure each key starts with '0x' and is 64 characters long"));
+          console.log(chalk.cyan("   - You can add multiple keys as PRIVATE_KEY_1, PRIVATE_KEY_2, etc."));
+          console.log(chalk.cyan("   - Save the file and restart the bot when ready\n"));
+          const { continueSetup } = await inquirer.prompt([
+            { type: "confirm", name: "continueSetup", message: "Continue with setup?", default: true }
+          ]);
+          if (!continueSetup) {
+            console.log(chalk.yellow("Setup cancelled. Please edit .env file and restart the bot."));
+            return await setupEnvAndKeys();
+          }
+        } else {
+          console.log(chalk.red("Failed to create .env file. Please create it manually."));
+          return await setupEnvAndKeys();
+        }
+      } else {
+        return await setupNewPrivateKeys();
       }
-      keys.forEach((k, i) => envVars[`PRIVATE_KEY_${i + 1}`] = k);
-      saveEnv(envVars);
-      console.log(chalk.green(".env file created with your private key(s)!"));
-      console.log(chalk.cyan("Recommendations:"));
-      console.log("- Keep your .env file secure and never share it.");
-      console.log("- You can add/remove keys later by editing .env or using the bot's menu.");
-      console.log("- Only use testnet keys for safety.");
-      dotenv.config();
+    } else {
+      // User chose not to create .env, return to startup
+      return await setupEnvAndKeys();
     }
   }
+  
   // Always reload env after possible changes
   dotenv.config();
-  return loadPrivateKeysFromEnv();
+  const privateKeys = loadPrivateKeysFromEnv();
+  
+  if (privateKeys.length === 0) {
+    console.log(chalk.red("❌ No valid private keys found in .env file!"));
+    console.log(chalk.cyan("Please ensure your .env file contains valid private keys:"));
+    console.log(chalk.cyan("- Each key should start with '0x' and be 64 characters long"));
+    console.log(chalk.cyan("- Example: PRIVATE_KEY_1=0x1234567890abcdef..."));
+    console.log(chalk.cyan("- Make sure you're not using the example keys from env.example"));
+    
+    const { retry } = await inquirer.prompt([
+      { type: "confirm", name: "retry", message: "Would you like to set up private keys now?", default: true }
+    ]);
+    
+    if (retry) {
+      return await setupNewPrivateKeys();
+    } else {
+      console.log(chalk.yellow("Setup cancelled. Please edit .env file and restart the bot."));
+      process.exit(0);
+    }
+  }
+  
+  console.log(chalk.green(`✅ Loaded ${privateKeys.length} valid private key(s)`));
+  console.log(chalk.cyan("All imported keys will be used for automation."));
+  console.log(chalk.cyan("Wallets with insufficient balance will be skipped automatically."));
+  return privateKeys;
+}
+
+// Helper function to add more private keys to existing setup
+async function addMorePrivateKeys(existingKeys: string[]): Promise<string[]> {
+  console.log(chalk.cyan(`\n📝 You currently have ${existingKeys.length} private key(s). Adding more...`));
+  
+  let newKeys: string[] = [];
+  let addMore = true;
+  let envVars: Record<string, string> = {};
+  
+  while (addMore) {
+    while (true) {
+      const { pk } = await inquirer.prompt([
+        { 
+          type: "password", 
+          name: "pk", 
+          message: `Enter private key #${existingKeys.length + newKeys.length + 1}:`, 
+          mask: "*"
+        }
+      ]);
+      
+      const normalizedPk = pk.startsWith('0x') ? pk : '0x' + pk;
+      const validation = validatePrivateKey(normalizedPk);
+      if (validation.isValid) {
+        // Check if key already exists in existing or new keys
+        if (existingKeys.includes(normalizedPk) || newKeys.includes(normalizedPk)) {
+          console.log(chalk.yellow("⚠️  This private key already exists"));
+          const { retry } = await inquirer.prompt([
+            { type: "confirm", name: "retry", message: "Try a different key?", default: true }
+          ]);
+          if (!retry) {
+            addMore = false;
+            break;
+          }
+        } else {
+          newKeys.push(normalizedPk);
+          console.log(chalk.green(`✅ Added private key #${existingKeys.length + newKeys.length}`));
+          break;
+        }
+      } else {
+        console.log(chalk.red(`❌ ${validation.error}`));
+        const { retry } = await inquirer.prompt([
+          { type: "confirm", name: "retry", message: "Try again?", default: true }
+        ]);
+        if (!retry) {
+          addMore = false;
+          break;
+        }
+      }
+    }
+    
+    if (addMore) {
+      const { more } = await inquirer.prompt([
+        { type: "confirm", name: "more", message: "Add another private key?", default: false }
+      ]);
+      addMore = more;
+    }
+  }
+  
+  if (newKeys.length > 0) {
+    // Save new keys to .env file
+    const allKeys = [...existingKeys, ...newKeys];
+    allKeys.forEach((k, i) => envVars[`PRIVATE_KEY_${i + 1}`] = k);
+    saveEnv(envVars);
+    
+    console.log(chalk.green(`\n✅ Successfully added ${newKeys.length} new private key(s)!`));
+    console.log(chalk.green(`📊 Total private keys: ${allKeys.length}`));
+    console.log(chalk.cyan("All imported keys will be used for automation."));
+    console.log(chalk.cyan("Wallets with insufficient balance will be skipped automatically."));
+    
+    // Log activity
+    logActivity({ 
+      type: 'settings', 
+      setting: 'private_keys', 
+      action: 'added', 
+      count: newKeys.length,
+      total: allKeys.length 
+    });
+    
+    dotenv.config();
+    return allKeys;
+  } else {
+    console.log(chalk.yellow("No new keys added. Continuing with existing keys."));
+    return existingKeys;
+  }
+}
+
+// Helper function to setup new private keys from scratch
+async function setupNewPrivateKeys(): Promise<string[]> {
+  const { keyMode } = await inquirer.prompt([
+    { type: "list", name: "keyMode", message: "Import a single private key or multiple?", choices: ["Single", "Multiple"] }
+  ]);
+  
+  let keys: string[] = [];
+  let envVars: Record<string, string> = {};
+  
+  if (keyMode === "Single") {
+    while (true) {
+      const { pk } = await inquirer.prompt([
+        { 
+          type: "password", 
+          name: "pk", 
+          message: "Enter your private key:", 
+          mask: "*"
+        }
+      ]);
+      
+      const normalizedPk = pk.startsWith('0x') ? pk : '0x' + pk;
+      const validation = validatePrivateKey(normalizedPk);
+      if (validation.isValid) {
+        keys = [normalizedPk];
+        break;
+      } else {
+        console.log(chalk.red(`❌ ${validation.error}`));
+        const { retry } = await inquirer.prompt([
+          { type: "confirm", name: "retry", message: "Try again?", default: true }
+        ]);
+        if (!retry) {
+          console.log(chalk.yellow("Setup cancelled."));
+          process.exit(0);
+        }
+      }
+    }
+  } else {
+    let addMore = true;
+    while (addMore) {
+      while (true) {
+        const { pk } = await inquirer.prompt([
+          { 
+            type: "password", 
+            name: "pk", 
+            message: `Enter private key #${keys.length + 1}:`, 
+            mask: "*"
+          }
+        ]);
+        
+        const normalizedPk = pk.startsWith('0x') ? pk : '0x' + pk;
+        const validation = validatePrivateKey(normalizedPk);
+        if (validation.isValid) {
+          // Check if key already exists
+          if (keys.includes(normalizedPk)) {
+            console.log(chalk.yellow("⚠️  This private key already exists"));
+            const { retry } = await inquirer.prompt([
+              { type: "confirm", name: "retry", message: "Try a different key?", default: true }
+            ]);
+            if (!retry) {
+              addMore = false;
+              break;
+            }
+          } else {
+            keys.push(normalizedPk);
+            break;
+          }
+        } else {
+          console.log(chalk.red(`❌ ${validation.error}`));
+          const { retry } = await inquirer.prompt([
+            { type: "confirm", name: "retry", message: "Try again?", default: true }
+          ]);
+          if (!retry) {
+            addMore = false;
+            break;
+          }
+        }
+      }
+      
+      if (addMore) {
+        const { more } = await inquirer.prompt([
+          { type: "confirm", name: "more", message: "Add another private key?", default: false }
+        ]);
+        addMore = more;
+      }
+    }
+  }
+  
+  if (keys.length > 0) {
+    keys.forEach((k, i) => envVars[`PRIVATE_KEY_${i + 1}`] = k);
+    saveEnv(envVars);
+    console.log(chalk.green(`✅ Successfully imported ${keys.length} private key(s)!`));
+    console.log(chalk.cyan("All imported keys will be used for automation."));
+    console.log(chalk.cyan("Wallets with insufficient balance will be skipped automatically."));
+    
+    // Log activity
+    logActivity({ 
+      type: 'settings', 
+      setting: 'private_keys', 
+      action: 'setup', 
+      count: keys.length 
+    });
+    
+    dotenv.config();
+    return keys;
+  } else {
+    console.log(chalk.red("No private keys were set up. Exiting."));
+    process.exit(1);
+  }
 }
 
 // Helper to load or prompt for networks
@@ -349,7 +721,7 @@ async function swapSettingsMenu() {
           "Set Fixed Interval",
           "Set Swap Amount",
           "Show Current Settings",
-          "Back to Main Menu"
+          "Back"
         ]
       }
     ]);
@@ -416,7 +788,7 @@ async function swapSettingsMenu() {
       log.step(`Current swap interval: ${swapSettings.intervalType === 'random' ? `${swapSettings.minInterval}ms - ${swapSettings.maxInterval}ms` : `${swapSettings.fixedInterval}ms`}`);
       log.step(`Swap amount: ${swapSettings.useFixedAmount ? `Fixed at ${swapSettings.swapAmount}${swapSettings.swapAmountRange ? ` (random between ${swapSettings.swapAmount} and ${swapSettings.swapAmountRange})` : ''}` : 'Random/min/max per token'}`);
       await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
-    } else if (swapAction === "Back to Main Menu") {
+    } else if (swapAction === "Back") {
       break;
     }
   }
@@ -462,7 +834,7 @@ async function tokenOptionsMenu(tokens: any[], networks: any[]) {
           "Remove Token",
           "Edit Token Settings",
           "Token History",
-          "Back to Main Menu"
+          "Back"
         ]
       }
     ]);
@@ -503,7 +875,7 @@ async function tokenOptionsMenu(tokens: any[], networks: any[]) {
         filtered.slice(-10).forEach((h, i) => console.log(`  [${i}] [${h.status.toUpperCase()}] ${h.message}${h.status !== 'success' ? ' Reason: ' + h.reason : ''}`));
       }
       await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
-    } else if (tokAction === "Back to Main Menu") {
+    } else if (tokAction === "Back") {
       break;
     }
   }
@@ -533,7 +905,7 @@ async function showInfoAndHistory(networks: any[], tokens: any[]) {
       if (activityHistory.length === 0) {
         console.log("  No activity yet.");
       } else {
-        activityHistory.slice(-50).forEach((a, i) => {
+        activityHistory.slice(-50).forEach((a: any, i: number) => {
           const time = new Date(a.timestamp).toLocaleString();
           if (a.type === 'settings') {
             console.log(`  [${i}] [${time}] SETTINGS: ${a.setting} (${a.action}) ${a.receiver ? `Receiver: ${a.receiver}` : ''}`);
@@ -555,11 +927,11 @@ async function showInfoAndHistory(networks: any[], tokens: any[]) {
       if (idx === -1) continue;
       const selectedNetwork = networks[idx].name;
       log.step(`Activity History for ${selectedNetwork}:`);
-      const filtered = activityHistory.filter(a => a.network === selectedNetwork);
+      const filtered = activityHistory.filter((a: any) => a.network === selectedNetwork);
       if (filtered.length === 0) {
         console.log("  No activity yet for this network.");
       } else {
-        filtered.slice(-50).forEach((a, i) => {
+        filtered.slice(-50).forEach((a: any, i: number) => {
           const time = new Date(a.timestamp).toLocaleString();
           if (a.type === 'settings') {
             console.log(`  [${i}] [${time}] SETTINGS: ${a.setting} (${a.action}) ${a.receiver ? `Receiver: ${a.receiver}` : ''}`);
@@ -621,7 +993,7 @@ async function networkOptionsMenu(networks: any[], tokens: any[]) {
           "Add Network",
           "Remove Network",
           "Network History",
-          "Back to Main Menu"
+          "Back"
         ]
       }
     ]);
@@ -672,7 +1044,7 @@ async function networkOptionsMenu(networks: any[], tokens: any[]) {
         });
       }
       await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to return" }]);
-    } else if (netAction === "Back to Main Menu") {
+    } else if (netAction === "Back") {
       break;
     }
   }
@@ -1135,19 +1507,71 @@ async function runDeploy({net, provider, privateKeys, walletIndex, simulationMod
 
 // Enhanced Start Automation logic
 async function startAutomationMenu(networks: any[], tokens: any[]) {
+  // Check if user has private keys
+  const privateKeys = loadPrivateKeysFromEnv();
+  if (privateKeys.length === 0) {
+    console.log(chalk.red("❌ No private keys found!"));
+    console.log(chalk.cyan("Please import private keys first in Modify Settings > Private Key Management"));
+    
+    const { goToSettings } = await inquirer.prompt([
+      { type: "confirm", name: "goToSettings", message: "Go to Private Key Management now?", default: true }
+    ]);
+    
+    if (goToSettings) {
+      await privateKeyManagementMenu();
+      // Reload keys after management
+      dotenv.config();
+      const updatedKeys = loadPrivateKeysFromEnv();
+      if (updatedKeys.length === 0) {
+        console.log(chalk.yellow("No private keys imported. Returning to main menu."));
+        return;
+      }
+    } else {
+      console.log(chalk.yellow("Automation cancelled. Returning to main menu."));
+      return;
+    }
+  }
+  
+  // Scan wallet balances before proceeding
+  console.log(chalk.cyan("\n🔍 Scanning wallet balances..."));
+  const availableWallets = await scanWalletBalances(networks, privateKeys);
+  
+  if (availableWallets.length === 0) {
+    console.log(chalk.red("❌ No wallets with sufficient balance found!"));
+    console.log(chalk.cyan("Please ensure your wallets have enough funds for automation"));
+    
+    const { goToWalletSettings } = await inquirer.prompt([
+      { type: "confirm", name: "goToWalletSettings", message: "Go to Wallet Settings to check balances?", default: true }
+    ]);
+    
+    if (goToWalletSettings) {
+      await walletSettingsMenu();
+    }
+    return;
+  }
+  
+  console.log(chalk.green(`✅ Found ${availableWallets.length} wallet(s) with sufficient balance`));
+  
   // Select networks
   const { whichNetworks } = await inquirer.prompt([
     {
       type: "checkbox",
       name: "whichNetworks",
-      message: "Select networks to run automation on (or select all):",
+      message: "Select networks to run automation on:",
       choices: networks.map((n) => ({ name: n.name, value: n }))
     }
   ]);
+  
   if (!whichNetworks || whichNetworks.length === 0) {
-    log.warn("No networks selected. Returning to menu.");
-    return;
+    const { confirmCancel } = await inquirer.prompt([
+      { type: "confirm", name: "confirmCancel", message: "No networks selected. Cancel automation?", default: true }
+    ]);
+    if (confirmCancel) {
+      log.warn("Automation cancelled. Returning to main menu.");
+      return;
+    }
   }
+  
   // For each network, select functions
   const networkFunctionMap: Record<string, string[]> = {};
   for (const net of whichNetworks) {
@@ -1160,28 +1584,52 @@ async function startAutomationMenu(networks: any[], tokens: any[]) {
         choices: available
       }
     ]);
+    
     if (!funcs || funcs.length === 0) {
-      log.warn(`No functions selected for ${net.name}. Skipping this network.`);
+      const { skipNetwork } = await inquirer.prompt([
+        { type: "confirm", name: "skipNetwork", message: `No functions selected for ${net.name}. Skip this network?`, default: true }
+      ]);
+      if (!skipNetwork) {
+        log.warn("Automation cancelled. Returning to main menu.");
+        return;
+      }
       continue;
     }
     networkFunctionMap[net.name] = funcs;
   }
+  
   if (Object.keys(networkFunctionMap).length === 0) {
-    log.warn("No networks with functions selected. Returning to menu.");
-    return;
+    const { confirmCancel } = await inquirer.prompt([
+      { type: "confirm", name: "confirmCancel", message: "No networks with functions selected. Cancel automation?", default: true }
+    ]);
+    if (confirmCancel) {
+      log.warn("Automation cancelled. Returning to main menu.");
+      return;
+    }
   }
+  
   // Confirm before starting
-  console.log(chalk.cyan("You have selected the following networks and functions:"));
+  console.log(chalk.cyan("\n📋 Automation Summary:"));
+  console.log(chalk.cyan("=".repeat(40)));
+  console.log(chalk.green(`💰 Available Wallets: ${availableWallets.length}`));
   Object.entries(networkFunctionMap).forEach(([net, funcs]) => {
-    console.log(`- ${net}: ${funcs.join(", ")}`);
+    console.log(chalk.white(`🌐 ${net}: ${funcs.join(", ")}`));
   });
+  
   const { confirmStart } = await inquirer.prompt([
     { type: "confirm", name: "confirmStart", message: "Proceed with automation?", default: true }
   ]);
+  
   if (!confirmStart) {
-    log.warn("Automation cancelled. Returning to menu.");
-    return;
+    const { confirmCancel } = await inquirer.prompt([
+      { type: "confirm", name: "confirmCancel", message: "Are you sure you want to cancel automation?", default: false }
+    ]);
+    if (confirmCancel) {
+      log.warn("Automation cancelled. Returning to main menu.");
+      return;
+    }
   }
+  
   // Pass selected networks and functions to automationLoop
   await automationLoop(
     networks.filter(n => networkFunctionMap[n.name]),
@@ -1189,6 +1637,42 @@ async function startAutomationMenu(networks: any[], tokens: any[]) {
     networkFunctionMap
   );
 }
+
+// New function to scan wallet balances
+async function scanWalletBalances(networks: any[], privateKeys: string[]): Promise<any[]> {
+  const availableWallets = [];
+  
+  for (const network of networks) {
+    const provider = new ethers.JsonRpcProvider(network.rpc, network.chainId);
+    
+    for (let i = 0; i < privateKeys.length; i++) {
+      try {
+        const wallet = new ethers.Wallet(privateKeys[i], provider);
+        const balance = await provider.getBalance(wallet.address);
+        const balanceEth = ethers.formatEther(balance);
+        const minBalance = globalMinimumBalance || 0.001;
+        
+        if (parseFloat(balanceEth) >= minBalance) {
+          availableWallets.push({
+            privateKey: privateKeys[i],
+            address: wallet.address,
+            balance: balanceEth,
+            network: network.name,
+            index: i
+          });
+        }
+      } catch (error: any) {
+        console.log(chalk.red(`Error checking wallet ${i + 1} on ${network.name}: ${error.message}`));
+      }
+    }
+  }
+  
+  return availableWallets;
+}
+
+// Global variables for wallet settings
+let globalMinimumBalance = 0.001;
+let globalAutoBalanceDistribution = false;
 
 // Helper: Approve token if needed
 async function approveIfNeeded(tokenAddress: string, owner: string, spender: string, amount: bigint, wallet: any, provider: any, decimals: number) {
@@ -1326,6 +1810,7 @@ async function mainMenu(networks: any[], tokens: any[], privateKey: string) {
         ]
       }
     ]);
+    
     if (action === "Start Automation") {
       await startAutomationMenu(networks, tokens);
     } else if (action === "Modify Settings") {
@@ -1341,8 +1826,13 @@ async function mainMenu(networks: any[], tokens: any[], privateKey: string) {
     } else if (action === "Other") {
       await otherMenu();
     } else if (action === "Exit") {
-      log.warn("Exiting bot.");
-      process.exit(0);
+      const { confirmExit } = await inquirer.prompt([
+        { type: "confirm", name: "confirmExit", message: "Are you sure you want to exit the bot?", default: false }
+      ]);
+      if (confirmExit) {
+        log.warn("Exiting bot.");
+        process.exit(0);
+      }
     }
   }
 }
@@ -1355,17 +1845,26 @@ async function modifySettingsMenu(networks: any[], tokens: any[], privateKey: st
         name: "setting",
         message: "Modify Settings:",
         choices: [
+          "Wallet Settings",
+          "Private Key Management",
           "Swap Settings",
           "Transfer Settings",
           "Liquidity Settings",
           "Network Options",
           "Token Options",
           "Deploy Options",
-          "Back to Main Menu"
+          "Back"
         ]
       }
     ]);
-    if (setting === "Swap Settings") {
+    
+    if (setting === "Wallet Settings") {
+      await walletSettingsMenu();
+      logActivity({ type: 'settings', action: 'modify', setting: 'Wallet Settings' });
+    } else if (setting === "Private Key Management") {
+      await privateKeyManagementMenu();
+      logActivity({ type: 'settings', action: 'modify', setting: 'Private Key Management' });
+    } else if (setting === "Swap Settings") {
       await swapSettingsMenu();
       log.info("Recommended: You can add slippage, max gas, swap direction, and more in future updates.");
       logActivity({ type: 'settings', action: 'modify', setting: 'Swap Settings', details: { ...swapSettings } });
@@ -1387,7 +1886,438 @@ async function modifySettingsMenu(networks: any[], tokens: any[], privateKey: st
       await deployOptionsMenu(networks, tokens, privateKey);
       log.info("Recommended: Add contract verification, upgradeability, and deployment history in future updates.");
       logActivity({ type: 'settings', action: 'modify', setting: 'Deploy Options' });
-    } else if (setting === "Back to Main Menu") {
+    } else if (setting === "Back") {
+      break;
+    }
+  }
+}
+
+// Private Key Management menu
+async function privateKeyManagementMenu() {
+  while (true) {
+    const currentKeys = loadPrivateKeysFromEnv();
+    const { action } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "action",
+        message: `Private Key Management (${currentKeys.length} keys loaded):`,
+        choices: [
+          "View Current Keys",
+          "Add New Private Key",
+          "Remove Private Key",
+          "Replace All Keys",
+          "Copy from env.example",
+          "Back"
+        ]
+      }
+    ]);
+    
+    if (action === "View Current Keys") {
+      if (currentKeys.length === 0) {
+        console.log(chalk.yellow("⚠️  No private keys found in .env file"));
+      } else {
+        console.log(chalk.cyan("\n📋 Current Private Keys:"));
+        console.log(chalk.cyan("=".repeat(80)));
+        
+        // Load networks for balance checking
+        const networks = await getNetworks();
+        
+        for (let i = 0; i < currentKeys.length; i++) {
+          const key = currentKeys[i];
+          const maskedKey = key.substring(0, 6) + "..." + key.substring(key.length - 4);
+          const wallet = new ethers.Wallet(key);
+          
+          console.log(chalk.white(`\n🔑 Key ${i + 1} (PRIVATE_KEY${i === 0 ? '' : '_' + (i + 1)}):`));
+          console.log(chalk.gray(`   Address: ${wallet.address}`));
+          console.log(chalk.gray(`   Private Key: ${maskedKey}`));
+          
+          // Show balances across networks
+          if (networks.length > 0) {
+            console.log(chalk.cyan("   Balances:"));
+            for (const network of networks) {
+              try {
+                const provider = new ethers.JsonRpcProvider(network.rpc, network.chainId);
+                const balance = await provider.getBalance(wallet.address);
+                const balanceEth = ethers.formatEther(balance);
+                const status = parseFloat(balanceEth) > 0.001 ? chalk.green("✅") : chalk.red("❌");
+                
+                console.log(chalk.gray(`     ${network.name}: ${balanceEth} ${network.nativeCurrency || 'ETH'} ${status}`));
+              } catch (error) {
+                console.log(chalk.red(`     ${network.name}: Error checking balance`));
+              }
+            }
+          }
+        }
+        
+        console.log(chalk.cyan("\n" + "=".repeat(80)));
+        console.log(chalk.cyan(`Total: ${currentKeys.length} key(s)`));
+        
+        // Show summary statistics
+        const totalWallets = currentKeys.length;
+        let activeWallets = 0;
+        
+        if (networks.length > 0) {
+          for (const network of networks) {
+            try {
+              const provider = new ethers.JsonRpcProvider(network.rpc, network.chainId);
+              for (const key of currentKeys) {
+                const wallet = new ethers.Wallet(key, provider);
+                const balance = await provider.getBalance(wallet.address);
+                if (balance > ethers.parseEther("0.001")) {
+                  activeWallets++;
+                  break; // Count wallet as active if it has balance on any network
+                }
+              }
+            } catch (error) {
+              // Skip network if error
+            }
+          }
+        }
+        
+        console.log(chalk.green(`Active Wallets: ${activeWallets}/${totalWallets}`));
+      }
+      await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+    } else if (action === "Add New Private Key") {
+      const { keyMode } = await inquirer.prompt([
+        { 
+          type: "list", 
+          name: "keyMode", 
+          message: "Import a single private key or multiple?", 
+          choices: ["Single", "Multiple"] 
+        }
+      ]);
+      
+      if (keyMode === "Single") {
+        while (true) {
+          const { pk } = await inquirer.prompt([
+            { 
+              type: "password", 
+              name: "pk", 
+              message: "Enter new private key:", 
+              mask: "*"
+            }
+          ]);
+          
+          const normalizedPk = pk.startsWith('0x') ? pk : '0x' + pk;
+          const validation = validatePrivateKey(normalizedPk);
+          if (validation.isValid) {
+            // Check if key already exists in current keys
+            if (currentKeys.includes(normalizedPk)) {
+              console.log(chalk.yellow("⚠️  This private key already exists in your .env file"));
+              const { retry } = await inquirer.prompt([
+                { type: "confirm", name: "retry", message: "Try a different key?", default: true }
+              ]);
+              if (!retry) break;
+            } else {
+              const newKeyIndex = currentKeys.length + 1;
+              const envVars: Record<string, string> = {};
+              envVars[`PRIVATE_KEY_${newKeyIndex}`] = normalizedPk;
+              saveEnv(envVars);
+              console.log(chalk.green(`✅ Private key added as PRIVATE_KEY_${newKeyIndex}`));
+              console.log(chalk.cyan("This wallet will be used in automation if it has sufficient balance."));
+              dotenv.config(); // Reload environment
+              break;
+            }
+          } else {
+            console.log(chalk.red(`❌ ${validation.error}`));
+          }
+          
+          const { retry } = await inquirer.prompt([
+            { type: "confirm", name: "retry", message: "Try again?", default: true }
+          ]);
+          if (!retry) break;
+        }
+      } else {
+        // Multiple keys mode
+        let addMore = true;
+        let addedKeys: string[] = [];
+        
+        while (addMore) {
+          while (true) {
+            const { pk } = await inquirer.prompt([
+              { 
+                type: "password", 
+                name: "pk", 
+                message: `Enter private key #${addedKeys.length + 1}:`, 
+                mask: "*"
+              }
+            ]);
+            
+            const normalizedPk = pk.startsWith('0x') ? pk : '0x' + pk;
+            const validation = validatePrivateKey(normalizedPk);
+            if (validation.isValid) {
+              // Check if key already exists in current keys
+              if (currentKeys.includes(normalizedPk)) {
+                console.log(chalk.yellow("⚠️  This private key already exists in your .env file"));
+                const { retry } = await inquirer.prompt([
+                  { type: "confirm", name: "retry", message: "Try a different key?", default: true }
+                ]);
+                if (!retry) {
+                  addMore = false;
+                  break;
+                }
+              } else {
+                addedKeys.push(normalizedPk);
+                console.log(chalk.green(`✅ Private key #${addedKeys.length} added`));
+                break;
+              }
+            } else {
+              console.log(chalk.red(`❌ ${validation.error}`));
+              const { retry } = await inquirer.prompt([
+                { type: "confirm", name: "retry", message: "Try again?", default: true }
+              ]);
+              if (!retry) {
+                addMore = false;
+                break;
+              }
+            }
+          }
+          
+          if (addMore) {
+            const { more } = await inquirer.prompt([
+              { type: "confirm", name: "more", message: "Add another private key?", default: false }
+            ]);
+            addMore = more;
+          }
+        }
+        
+        if (addedKeys.length > 0) {
+          // Save all added keys
+          const envVars: Record<string, string> = {};
+          addedKeys.forEach((key, index) => {
+            const newKeyIndex = currentKeys.length + index + 1;
+            envVars[`PRIVATE_KEY_${newKeyIndex}`] = key;
+          });
+          saveEnv(envVars);
+          console.log(chalk.green(`✅ Successfully added ${addedKeys.length} new private key(s)`));
+          console.log(chalk.cyan("All new wallets will be used in automation if they have sufficient balance."));
+          dotenv.config(); // Reload environment
+        }
+      }
+    } else if (action === "Remove Private Key") {
+      if (currentKeys.length === 0) {
+        console.log(chalk.yellow("⚠️  No private keys to remove"));
+        await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+      } else {
+        const keyChoices = currentKeys.map((key, index) => {
+          const maskedKey = key.substring(0, 6) + "..." + key.substring(key.length - 4);
+          const wallet = new ethers.Wallet(key);
+          return { 
+            name: `${index + 1}. ${maskedKey} (${wallet.address.substring(0, 6)}...)`, 
+            value: index 
+          };
+        });
+        
+        const { keyIndex } = await inquirer.prompt([
+          { 
+            type: "list", 
+            name: "keyIndex", 
+            message: "Select key to remove:", 
+            choices: keyChoices
+          }
+        ]);
+        
+        const selectedKey = currentKeys[keyIndex];
+        const selectedWallet = new ethers.Wallet(selectedKey);
+        
+        console.log(chalk.yellow(`\n⚠️  You are about to remove:`));
+        console.log(chalk.white(`   Address: ${selectedWallet.address}`));
+        console.log(chalk.white(`   Private Key: ${selectedKey.substring(0, 6)}...${selectedKey.substring(selectedKey.length - 4)}`));
+        
+        const { confirm } = await inquirer.prompt([
+          { type: "confirm", name: "confirm", message: "Are you sure you want to remove this key?", default: false }
+        ]);
+        
+        if (confirm) {
+          // Remove the key by rewriting the .env file without it
+          const envVars: Record<string, string> = {};
+          let newIndex = 1;
+          currentKeys.forEach((key, index) => {
+            if (index !== keyIndex) {
+              envVars[`PRIVATE_KEY${newIndex === 1 ? '' : '_' + newIndex}`] = key;
+              newIndex++;
+            }
+          });
+          saveEnv(envVars);
+          
+          console.log(chalk.green("✅ Private key removed successfully"));
+          console.log(chalk.cyan(`   Removed: ${selectedWallet.address}`));
+          
+          // Log the activity
+          logActivity({
+            type: 'private_key_management',
+            action: 'remove',
+            details: {
+              removed_address: selectedWallet.address,
+              remaining_keys: currentKeys.length - 1,
+              removed_index: keyIndex + 1
+            },
+            status: 'completed'
+          });
+          
+          dotenv.config(); // Reload environment
+        } else {
+          console.log(chalk.cyan("❌ Key removal cancelled"));
+        }
+      }
+    } else if (action === "Replace All Keys") {
+      console.log(chalk.yellow(`\n⚠️  You are about to replace ALL ${currentKeys.length} existing private keys`));
+      console.log(chalk.white("This action will:"));
+      console.log(chalk.white("   • Remove all current private keys"));
+      console.log(chalk.white("   • Add new private keys"));
+      console.log(chalk.white("   • Update your .env file"));
+      
+      const { confirm } = await inquirer.prompt([
+        { type: "confirm", name: "confirm", message: "Are you sure you want to replace ALL existing private keys?", default: false }
+      ]);
+      
+      if (confirm) {
+        // Log the replacement start
+        logActivity({
+          type: 'private_key_management',
+          action: 'replace_all_start',
+          details: {
+            previous_keys_count: currentKeys.length,
+            previous_addresses: currentKeys.map(key => new ethers.Wallet(key).address)
+          },
+          status: 'started'
+        });
+        
+        const { keyMode } = await inquirer.prompt([
+          { type: "list", name: "keyMode", message: "Import a single private key or multiple?", choices: ["Single", "Multiple"] }
+        ]);
+        
+        let keys: string[] = [];
+        if (keyMode === "Single") {
+          while (true) {
+            const { pk } = await inquirer.prompt([
+              { 
+                type: "password", 
+                name: "pk", 
+                message: "Enter your private key:", 
+                mask: "*"
+              }
+            ]);
+            const normalizedPk = pk.startsWith('0x') ? pk : '0x' + pk;
+            const validation = validatePrivateKey(normalizedPk);
+            if (validation.isValid) {
+              keys = [normalizedPk];
+              break;
+            } else {
+              console.log(chalk.red(`❌ ${validation.error}`));
+              const { retry } = await inquirer.prompt([
+                { type: "confirm", name: "retry", message: "Try again?", default: true }
+              ]);
+              if (!retry) break;
+            }
+          }
+        } else {
+          let addMore = true;
+          while (addMore) {
+            while (true) {
+              const { pk } = await inquirer.prompt([
+                { 
+                  type: "password", 
+                  name: "pk", 
+                  message: `Enter private key #${keys.length + 1}:`, 
+                  mask: "*"
+                }
+              ]);
+              const normalizedPk = pk.startsWith('0x') ? pk : '0x' + pk;
+              const validation = validatePrivateKey(normalizedPk);
+              if (validation.isValid) {
+                keys.push(normalizedPk);
+                console.log(chalk.green(`✅ Private key #${keys.length} added`));
+                break;
+              } else {
+                console.log(chalk.red(`❌ ${validation.error}`));
+                const { retry } = await inquirer.prompt([
+                  { type: "confirm", name: "retry", message: "Try again?", default: true }
+                ]);
+                if (!retry) {
+                  addMore = false;
+                  break;
+                }
+              }
+            }
+            
+            if (addMore) {
+              const { more } = await inquirer.prompt([
+                { type: "confirm", name: "more", message: "Add another private key?", default: false }
+              ]);
+              addMore = more;
+            }
+          }
+        }
+        
+        if (keys.length > 0) {
+          const envVars: Record<string, string> = {};
+          keys.forEach((k, i) => envVars[`PRIVATE_KEY${i === 0 ? '' : '_' + (i + 1)}`] = k);
+          saveEnv(envVars);
+          
+          console.log(chalk.green(`✅ Successfully replaced all keys with ${keys.length} new key(s)`));
+          console.log(chalk.cyan("New wallet addresses:"));
+          keys.forEach((key, index) => {
+            const wallet = new ethers.Wallet(key);
+            console.log(chalk.white(`   ${index + 1}. ${wallet.address}`));
+          });
+          
+          // Log the replacement completion
+          logActivity({
+            type: 'private_key_management',
+            action: 'replace_all_complete',
+            details: {
+              new_keys_count: keys.length,
+              new_addresses: keys.map(key => new ethers.Wallet(key).address),
+              previous_keys_count: currentKeys.length
+            },
+            status: 'completed'
+          });
+          
+          dotenv.config(); // Reload environment
+        } else {
+          console.log(chalk.yellow("❌ No keys were added. Keeping existing keys."));
+          
+          // Log the cancellation
+          logActivity({
+            type: 'private_key_management',
+            action: 'replace_all_cancelled',
+            details: {
+              reason: 'no_keys_provided',
+              previous_keys_count: currentKeys.length
+            },
+            status: 'cancelled'
+          });
+        }
+      } else {
+        console.log(chalk.cyan("❌ Key replacement cancelled"));
+      }
+    } else if (action === "Copy from env.example") {
+      if (await copyEnvExampleToEnv()) {
+        console.log(chalk.cyan("\n📝 Please edit the .env file with your actual private keys:"));
+        console.log(chalk.cyan("   - Replace the example keys (0x0000...) with your real private keys"));
+        console.log(chalk.cyan("   - Make sure each key starts with '0x' and is 64 characters long"));
+        console.log(chalk.cyan("   - You can add multiple keys as PRIVATE_KEY_1, PRIVATE_KEY_2, etc."));
+        console.log(chalk.cyan("   - Save the file and restart the bot when ready\n"));
+        
+        const { continueSetup } = await inquirer.prompt([
+          { type: "confirm", name: "continueSetup", message: "Continue with setup?", default: true }
+        ]);
+        
+        if (!continueSetup) {
+          console.log(chalk.yellow("Setup cancelled. Please edit .env file and restart the bot."));
+          process.exit(0);
+        }
+        dotenv.config(); // Reload environment
+        // After reloading, check if valid keys are now available
+        const updatedKeys = loadPrivateKeysFromEnv();
+        if (updatedKeys.length > 0) {
+          console.log(chalk.green(`✅ Successfully loaded ${updatedKeys.length} valid private key(s)`));
+        } else {
+          console.log(chalk.yellow("⚠️  No valid private keys found. Please edit .env file with real keys."));
+        }
+      }
+    } else if (action === "Back") {
       break;
     }
   }
@@ -1441,7 +2371,7 @@ async function otherMenu() {
         message: "Other Options:",
         choices: [
           simulationMode ? "Disable Simulation Mode" : "Enable Simulation Mode",
-          "Back to Main Menu"
+          "Back"
         ]
       }
     ]);
@@ -1451,7 +2381,7 @@ async function otherMenu() {
     } else if (otherAction === "Disable Simulation Mode") {
       simulationMode = false;
       log.success("Simulation/Dry Run Mode disabled. Real transactions will be sent.");
-    } else if (otherAction === "Back to Main Menu") {
+    } else if (otherAction === "Back") {
       break;
     }
   }
@@ -1504,11 +2434,12 @@ async function automationLoop(selectedNetworks: any[], tokens: any[], networkFun
   automationActive = true;
   let swapCount = 0, transferCount = 0, faucetCount = 0, deployCount = 0, checkinCount = 0, liquidityCount = 0;
   let swapHistory: any[] = [];
-  let privateKeys = loadPrivateKeysFromEnv();
-  let walletIndex = 0;
+  
   log.success("Automation started! Press Ctrl+C to stop and return to menu.");
   let stopRequested = false;
-  process.on("SIGINT", async () => {
+  
+  // Setup SIGINT handler
+  const sigintHandler = async () => {
     if (automationActive && !stopRequested) {
       stopRequested = true;
       const { confirmStop } = await inquirer.prompt([
@@ -1517,11 +2448,15 @@ async function automationLoop(selectedNetworks: any[], tokens: any[], networkFun
       if (confirmStop) {
         log.warn("\nAutomation stopped. Returning to menu...");
         automationActive = false;
+        process.removeListener('SIGINT', sigintHandler);
       } else {
         stopRequested = false;
       }
     }
-  });
+  };
+  
+  process.on("SIGINT", sigintHandler);
+  
   // Prompt for transfer receiver if running all functions, but only if not already set
   let promptForReceiver = false;
   for (const net of selectedNetworks) {
@@ -1533,6 +2468,7 @@ async function automationLoop(selectedNetworks: any[], tokens: any[], networkFun
     if (selectedFuncs.length === 1 && selectedFuncs[0] === "Liquidity") {
       log.warn("Liquidity function is not implemented yet. Returning to main menu.");
       automationActive = false;
+      process.removeListener('SIGINT', sigintHandler);
       return;
     }
     if (
@@ -1554,128 +2490,241 @@ async function automationLoop(selectedNetworks: any[], tokens: any[], networkFun
     ]);
     globalTransferReceiver = receiver;
   }
-  while (automationActive) {
-    for (const net of selectedNetworks) {
-      let selectedFuncs = networkFunctionMap ? networkFunctionMap[net.name] : ["Swap"];
-      if (selectedFuncs.includes("Run all functions")) {
-        selectedFuncs = getNetworkFunctions(net.name).filter(f => f !== "Run all functions");
-      }
-      // If only Liquidity is selected, return to main menu
-      if (selectedFuncs.length === 1 && selectedFuncs[0] === "Liquidity") {
-        log.warn("Liquidity function is not implemented yet. Returning to main menu.");
-        automationActive = false;
-        return;
-      }
-      if (!selectedFuncs || selectedFuncs.length === 0) continue;
-      const provider = new ethers.JsonRpcProvider(net.rpc, net.chainId);
-      // If running all functions, do them in sequence, not parallel
-      if (
-        selectedFuncs.length === 6 &&
-        selectedFuncs.includes("Swap") &&
-        selectedFuncs.includes("Liquidity") &&
-        selectedFuncs.includes("Transfer") &&
-        selectedFuncs.includes("Faucet") &&
-        selectedFuncs.includes("Deploy") &&
-        selectedFuncs.includes("Check-in")
-      ) {
-        let summary: any[] = [];
-        // SWAP
-        let swapResult = await runSwap({net, tokens, provider, privateKeys, walletIndex, simulationMode, log, contractExists, toFixedDecimals, ethers, swapCount, swapHistory});
-        summary.push({ function: 'Swap', ...swapResult });
-        // LIQUIDITY (skip, just log)
-        log.warn('This function is not implemented yet. Skipping Liquidity.');
-        summary.push({ function: 'Liquidity', status: 'skipped', reason: 'Not implemented' });
-        // TRANSFER
-        let transferResult = await runTransfer({net, provider, privateKeys, walletIndex, simulationMode, log, receiver: globalTransferReceiver});
-        summary.push({ function: 'Transfer', ...transferResult });
-        // FAUCET
-        let faucetResult = await runFaucet({net, provider, privateKeys, walletIndex, simulationMode, log});
-        summary.push({ function: 'Faucet', ...faucetResult });
-        // DEPLOY
-        let deployResult = await runDeploy({net, provider, privateKeys, walletIndex, simulationMode, log});
-        summary.push({ function: 'Deploy', ...deployResult });
-        // CHECK-IN
-        let checkinResult = await runCheckin({net, provider, privateKeys, walletIndex, simulationMode, log});
-        summary.push({ function: 'Check-in', ...checkinResult });
-        // Display summary
-        log.info("\n=== Bulk Run Summary ===");
-        summary.forEach((s: any) => {
-          log.info(`${s.function}: ${s.status}${s.txHash ? ` (Tx: ${s.txHash})` : ''}${s.reason ? ` - ${s.reason}` : ''}`);
-        });
-        log.info("=======================\n");
-        // Wait random interval before next bulk run
+  
+  try {
+    while (automationActive) {
+      for (const net of selectedNetworks) {
         if (!automationActive) break;
-        const waitSec = Math.floor(Math.random() * (40 - 30 + 1)) + 30;
-        log.loading(`Waiting ${waitSec} seconds before next bulk run...`);
-        await new Promise(res => setTimeout(res, waitSec * 1000));
-        continue;
-      }
-      // Otherwise, run selected functions in parallel as before
-      await Promise.all(selectedFuncs.map(async (func) => {
-        if (!automationActive) return;
-        if (func === "Swap") {
-          let swapResult = await runSwap({net, tokens, provider, privateKeys, walletIndex, simulationMode, log, contractExists, toFixedDecimals, ethers, swapCount, swapHistory});
-          if (swapResult.status === 'success') {
-            swapCount++;
-            log.success(`Swap #${swapCount} for ${tokens[0].symbol} on ${net.name} complete!`);
-            log.success(`Tx Hash: ${swapResult.txHash}`);
-            log.success(`Explorer: https://testnet.pharosscan.xyz/tx/${swapResult.txHash}`);
-            swapHistory.push({ status: 'success', txHash: swapResult.txHash, type: 'Swap', network: net.name });
-          } else {
-            log.warn(`Swap #${swapCount + 1} failed. Reason: ${swapResult.reason}`);
-            swapHistory.push({ status: swapResult.status, type: 'Swap', network: net.name, reason: swapResult.reason });
-          }
-        } else if (func === "Liquidity") {
-          log.warn('This function is not implemented yet. Please go back.');
+        
+        let selectedFuncs = networkFunctionMap ? networkFunctionMap[net.name] : ["Swap"];
+        if (selectedFuncs.includes("Run all functions")) {
+          selectedFuncs = getNetworkFunctions(net.name).filter(f => f !== "Run all functions");
+        }
+        
+        // If only Liquidity is selected, return to main menu
+        if (selectedFuncs.length === 1 && selectedFuncs[0] === "Liquidity") {
+          log.warn("Liquidity function is not implemented yet. Returning to main menu.");
           automationActive = false;
-          return;
-        } else if (func === "Transfer") {
-          let transferResult = await runTransfer({net, provider, privateKeys, walletIndex, simulationMode, log, receiver: globalTransferReceiver});
-          if (transferResult.status === 'success') {
-            transferCount++;
-            log.success(`Transfer completed: ${transferResult.txHash}`);
-            log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${transferResult.txHash}`);
-            swapHistory.push({ status: transferResult.status, type: 'Transfer', network: net.name, reason: transferResult.reason });
-          } else {
-            log.warn(`Transfer failed. Reason: ${transferResult.reason}`);
-            swapHistory.push({ status: transferResult.status, type: 'Transfer', network: net.name, reason: transferResult.reason });
+          break;
+        }
+        
+        if (!selectedFuncs || selectedFuncs.length === 0) continue;
+        const provider = new ethers.JsonRpcProvider(net.rpc, net.chainId);
+        
+        // Initialize wallets for this network
+        await initializeWallets(provider);
+        
+        // Check if we have any wallets with balance
+        const walletsWithBalance = allWallets.filter(w => w.hasBalance);
+        if (walletsWithBalance.length === 0) {
+          log.warn(`❌ No wallets with sufficient balance on ${net.name}. Skipping network.`);
+          continue;
+        }
+        
+        // If running all functions, do them in sequence, not parallel
+        if (
+          selectedFuncs.length === 6 &&
+          selectedFuncs.includes("Swap") &&
+          selectedFuncs.includes("Liquidity") &&
+          selectedFuncs.includes("Transfer") &&
+          selectedFuncs.includes("Faucet") &&
+          selectedFuncs.includes("Deploy") &&
+          selectedFuncs.includes("Check-in")
+        ) {
+          if (!automationActive) break;
+          
+          let summary: any[] = [];
+          
+          // Get next wallet with balance for each operation
+          const wallet = getNextWalletWithBalance();
+          if (!wallet) {
+            log.warn("❌ No wallets with sufficient balance. Skipping operations.");
+            continue;
           }
-        } else if (func === "Faucet") {
-          let faucetResult = await runFaucet({net, provider, privateKeys, walletIndex, simulationMode, log});
-          if (faucetResult.status === 'success') {
-            faucetCount++;
-            log.success(`Faucet claimed successfully.`);
-            swapHistory.push({ status: faucetResult.status, type: 'Faucet', network: net.name, reason: faucetResult.reason });
-          } else {
-            log.warn(`Faucet claim failed. Reason: ${faucetResult.reason}`);
-            swapHistory.push({ status: faucetResult.status, type: 'Faucet', network: net.name, reason: faucetResult.reason });
+          
+          // SWAP
+          if (automationActive) {
+            let swapResult = await runSwap({net, tokens, provider, privateKeys: [wallet.privateKey], walletIndex: 0, simulationMode, log, contractExists, toFixedDecimals, ethers, swapCount, swapHistory});
+            summary.push({ function: 'Swap', wallet: wallet.address.substring(0, 6) + '...', ...swapResult });
+            if (swapResult.status === 'success') {
+              await updateWalletBalance(wallet.address, provider);
+            }
           }
-        } else if (func === "Check-in") {
-          let checkinResult = await runCheckin({net, provider, privateKeys, walletIndex, simulationMode, log});
-          if (checkinResult.status === 'success') {
-            checkinCount++;
-            log.success(`Check-in successful.`);
-            swapHistory.push({ status: checkinResult.status, type: 'Check-in', network: net.name, reason: checkinResult.reason });
-          } else {
-            log.warn(`Check-in failed. Reason: ${checkinResult.reason}`);
-            swapHistory.push({ status: checkinResult.status, type: 'Check-in', network: net.name, reason: checkinResult.reason });
+          
+          // LIQUIDITY (skip, just log)
+          if (automationActive) {
+            log.warn('This function is not implemented yet. Skipping Liquidity.');
+            summary.push({ function: 'Liquidity', status: 'skipped', reason: 'Not implemented' });
           }
-        } else if (func === "Deploy") {
-          let deployResult = await runDeploy({net, provider, privateKeys, walletIndex, simulationMode, log});
-          if (deployResult.status === 'success') {
-            deployCount++;
-            log.success(`Deploy/StartTimer called. Tx: ${deployResult.txHash}`);
-            log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${deployResult.txHash}`);
-            swapHistory.push({ status: deployResult.status, type: 'Deploy', network: net.name, reason: deployResult.reason });
-          } else {
-            log.warn(`Deploy/StartTimer failed. Reason: ${deployResult.reason}`);
-            swapHistory.push({ status: deployResult.status, type: 'Deploy', network: net.name, reason: deployResult.reason });
+          
+          // TRANSFER
+          if (automationActive) {
+            const transferWallet = getNextWalletWithBalance();
+            if (transferWallet) {
+              let transferResult = await runTransfer({net, provider, privateKeys: [transferWallet.privateKey], walletIndex: 0, simulationMode, log, receiver: globalTransferReceiver});
+              summary.push({ function: 'Transfer', wallet: transferWallet.address.substring(0, 6) + '...', ...transferResult });
+              if (transferResult.status === 'success') {
+                await updateWalletBalance(transferWallet.address, provider);
+              }
+            } else {
+              summary.push({ function: 'Transfer', status: 'skipped', reason: 'No wallet with balance' });
+            }
+          }
+          
+          // FAUCET
+          if (automationActive) {
+            const faucetWallet = getNextWalletWithBalance();
+            if (faucetWallet) {
+              let faucetResult = await runFaucet({net, provider, privateKeys: [faucetWallet.privateKey], walletIndex: 0, simulationMode, log});
+              summary.push({ function: 'Faucet', wallet: faucetWallet.address.substring(0, 6) + '...', ...faucetResult });
+              if (faucetResult.status === 'success') {
+                await updateWalletBalance(faucetWallet.address, provider);
+              }
+            } else {
+              summary.push({ function: 'Faucet', status: 'skipped', reason: 'No wallet with balance' });
+            }
+          }
+          
+          // CHECK-IN
+          if (automationActive) {
+            const checkinWallet = getNextWalletWithBalance();
+            if (checkinWallet) {
+              let checkinResult = await runCheckin({net, provider, privateKeys: [checkinWallet.privateKey], walletIndex: 0, simulationMode, log});
+              summary.push({ function: 'Check-in', wallet: checkinWallet.address.substring(0, 6) + '...', ...checkinResult });
+              if (checkinResult.status === 'success') {
+                await updateWalletBalance(checkinWallet.address, provider);
+              }
+            } else {
+              summary.push({ function: 'Check-in', status: 'skipped', reason: 'No wallet with balance' });
+            }
+          }
+          
+          // DEPLOY
+          if (automationActive) {
+            const deployWallet = getNextWalletWithBalance();
+            if (deployWallet) {
+              let deployResult = await runDeploy({net, provider, privateKeys: [deployWallet.privateKey], walletIndex: 0, simulationMode, log});
+              summary.push({ function: 'Deploy', wallet: deployWallet.address.substring(0, 6) + '...', ...deployResult });
+              if (deployResult.status === 'success') {
+                await updateWalletBalance(deployWallet.address, provider);
+              }
+            } else {
+              summary.push({ function: 'Deploy', status: 'skipped', reason: 'No wallet with balance' });
+            }
+          }
+          
+          // Display summary
+          if (automationActive) {
+            log.info("\n=== Bulk Run Summary ===");
+            summary.forEach((s: any) => {
+              const walletInfo = s.wallet ? ` (${s.wallet})` : '';
+              log.info(`${s.function}: ${s.status}${walletInfo}${s.txHash ? ` (Tx: ${s.txHash})` : ''}${s.reason ? ` - ${s.reason}` : ''}`);
+            });
+            log.info("=======================\n");
+          }
+          
+          // Wait random interval before next bulk run
+          if (!automationActive) break;
+          const waitSec = Math.floor(Math.random() * (40 - 30 + 1)) + 30;
+          log.loading(`Waiting ${waitSec} seconds before next bulk run...`);
+          await new Promise(res => setTimeout(res, waitSec * 1000));
+          continue;
+        }
+        
+        // Otherwise, run selected functions sequentially (not in parallel)
+        for (const func of selectedFuncs) {
+          if (!automationActive) break;
+          
+          const wallet = getNextWalletWithBalance();
+          if (!wallet) {
+            log.warn(`❌ No wallet with balance for ${func}. Skipping.`);
+            continue;
+          }
+          
+          if (func === "Swap") {
+            let swapResult = await runSwap({net, tokens, provider, privateKeys: [wallet.privateKey], walletIndex: 0, simulationMode, log, contractExists, toFixedDecimals, ethers, swapCount, swapHistory});
+            if (swapResult.status === 'success') {
+              swapCount++;
+              log.success(`Swap #${swapCount} for ${tokens[0].symbol} on ${net.name} complete! (${wallet.address.substring(0, 6)}...)`);
+              log.success(`Tx Hash: ${swapResult.txHash}`);
+              log.success(`Explorer: https://testnet.pharosscan.xyz/tx/${swapResult.txHash}`);
+              swapHistory.push({ status: 'success', txHash: swapResult.txHash, type: 'Swap', network: net.name, wallet: wallet.address.substring(0, 6) + '...' });
+              await updateWalletBalance(wallet.address, provider);
+            } else {
+              log.warn(`Swap #${swapCount + 1} failed. Reason: ${swapResult.reason}`);
+              swapHistory.push({ status: swapResult.status, type: 'Swap', network: net.name, reason: swapResult.reason, wallet: wallet.address.substring(0, 6) + '...' });
+            }
+          } else if (func === "Liquidity") {
+            log.warn('This function is not implemented yet. Please go back.');
+            automationActive = false;
+            break;
+          } else if (func === "Transfer") {
+            let transferResult = await runTransfer({net, provider, privateKeys: [wallet.privateKey], walletIndex: 0, simulationMode, log, receiver: globalTransferReceiver});
+            if (transferResult.status === 'success') {
+              transferCount++;
+              log.success(`Transfer completed: ${transferResult.txHash} (${wallet.address.substring(0, 6)}...)`);
+              log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${transferResult.txHash}`);
+              swapHistory.push({ status: transferResult.status, type: 'Transfer', network: net.name, reason: transferResult.reason, wallet: wallet.address.substring(0, 6) + '...' });
+              await updateWalletBalance(wallet.address, provider);
+            } else {
+              log.warn(`Transfer failed. Reason: ${transferResult.reason}`);
+              swapHistory.push({ status: transferResult.status, type: 'Transfer', network: net.name, reason: transferResult.reason, wallet: wallet.address.substring(0, 6) + '...' });
+            }
+          } else if (func === "Faucet") {
+            let faucetResult = await runFaucet({net, provider, privateKeys: [wallet.privateKey], walletIndex: 0, simulationMode, log});
+            if (faucetResult.status === 'success') {
+              faucetCount++;
+              log.success(`Faucet claimed successfully (${wallet.address.substring(0, 6)}...)`);
+              swapHistory.push({ status: faucetResult.status, type: 'Faucet', network: net.name, reason: faucetResult.reason, wallet: wallet.address.substring(0, 6) + '...' });
+              await updateWalletBalance(wallet.address, provider);
+            } else {
+              log.warn(`Faucet claim failed. Reason: ${faucetResult.reason}`);
+              swapHistory.push({ status: faucetResult.status, type: 'Faucet', network: net.name, reason: faucetResult.reason, wallet: wallet.address.substring(0, 6) + '...' });
+            }
+          } else if (func === "Check-in") {
+            let checkinResult = await runCheckin({net, provider, privateKeys: [wallet.privateKey], walletIndex: 0, simulationMode, log});
+            if (checkinResult.status === 'success') {
+              checkinCount++;
+              log.success(`Check-in successful (${wallet.address.substring(0, 6)}...)`);
+              swapHistory.push({ status: checkinResult.status, type: 'Check-in', network: net.name, reason: checkinResult.reason, wallet: wallet.address.substring(0, 6) + '...' });
+              await updateWalletBalance(wallet.address, provider);
+            } else {
+              log.warn(`Check-in failed. Reason: ${checkinResult.reason}`);
+              swapHistory.push({ status: checkinResult.status, type: 'Check-in', network: net.name, reason: checkinResult.reason, wallet: wallet.address.substring(0, 6) + '...' });
+            }
+          } else if (func === "Deploy") {
+            let deployResult = await runDeploy({net, provider, privateKeys: [wallet.privateKey], walletIndex: 0, simulationMode, log});
+            if (deployResult.status === 'success') {
+              deployCount++;
+              log.success(`Deploy/StartTimer called. Tx: ${deployResult.txHash} (${wallet.address.substring(0, 6)}...)`);
+              log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${deployResult.txHash}`);
+              swapHistory.push({ status: deployResult.status, type: 'Deploy', network: net.name, reason: deployResult.reason, wallet: wallet.address.substring(0, 6) + '...' });
+              await updateWalletBalance(wallet.address, provider);
+            } else {
+              log.warn(`Deploy/StartTimer failed. Reason: ${deployResult.reason}`);
+              swapHistory.push({ status: deployResult.status, type: 'Deploy', network: net.name, reason: deployResult.reason, wallet: wallet.address.substring(0, 6) + '...' });
+            }
+          }
+          
+          // Add a small delay between operations to prevent overwhelming the network
+          if (automationActive && selectedFuncs.length > 1) {
+            await new Promise(res => setTimeout(res, 2000));
           }
         }
-      }));
-      if (!automationActive) break;
+        
+        if (!automationActive) break;
+      }
+      
+      // Add delay between network cycles
+      if (automationActive) {
+        const waitSec = Math.floor(Math.random() * (60 - 30 + 1)) + 30;
+        log.loading(`Waiting ${waitSec} seconds before next cycle...`);
+        await new Promise(res => setTimeout(res, waitSec * 1000));
+      }
     }
-    if (!automationActive) break;
+  } finally {
+    // Clean up SIGINT handler
+    process.removeListener('SIGINT', sigintHandler);
   }
 }
 
@@ -1783,15 +2832,225 @@ function logActivity(entry: any) {
   saveActivityHistory(activityHistory);
 }
 
+// Wallet Settings Menu and Helper Functions
+async function walletSettingsMenu() {
+  while (true) {
+    const { action } = await inquirer.prompt([
+      {
+        type: "list",
+        name: "action",
+        message: `Wallet Settings (${loadPrivateKeysFromEnv().length} keys loaded):`,
+        choices: [
+          "View Wallet Balances",
+          "Set Minimum Balance Threshold",
+          "Wallet Priority Settings",
+          "Auto-Balance Distribution",
+          "Wallet Health Check",
+          "Back"
+        ]
+      }
+    ]);
+    if (action === "View Wallet Balances") {
+      await viewWalletBalances(true); // pass true for responsive mode
+    } else if (action === "Set Minimum Balance Threshold") {
+      await setMinimumBalanceThreshold(true);
+    } else if (action === "Wallet Priority Settings") {
+      await walletPrioritySettings(true);
+    } else if (action === "Auto-Balance Distribution") {
+      await autoBalanceDistribution(true);
+    } else if (action === "Wallet Health Check") {
+      await walletHealthCheck(true);
+    } else if (action === "Back") {
+      break;
+    }
+  }
+}
+
+// Update each function to accept a 'responsive' parameter and skip the 'Press Enter' prompt if true
+async function viewWalletBalances(responsive = false) {
+  const currentKeys = loadPrivateKeysFromEnv();
+  if (currentKeys.length === 0) {
+    console.log(chalk.yellow("⚠️  No private keys found"));
+    if (!responsive) await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+    return;
+  }
+  console.log(chalk.cyan("\n📊 Wallet Balance Overview:"));
+  console.log(chalk.cyan("=".repeat(50)));
+  const networks = await getNetworks();
+  if (networks.length === 0) {
+    console.log(chalk.yellow("No networks configured. Please add networks first."));
+    if (!responsive) await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+    return;
+  }
+  for (const network of networks) {
+    console.log(chalk.green(`\n🌐 ${network.name}:`));
+    const provider = new ethers.JsonRpcProvider(network.rpc, network.chainId);
+    for (let i = 0; i < currentKeys.length; i++) {
+      try {
+        const wallet = new ethers.Wallet(currentKeys[i], provider);
+        const balance = await provider.getBalance(wallet.address);
+        const balanceEth = ethers.formatEther(balance);
+        const status = parseFloat(balanceEth) > 0.001 ? chalk.green("✅ Active") : chalk.red("❌ Low Balance");
+        console.log(chalk.white(`  Wallet ${i + 1}: ${wallet.address.substring(0, 6)}...${wallet.address.substring(wallet.address.length - 4)}`));
+        console.log(chalk.gray(`    Balance: ${balanceEth} ${network.nativeCurrency || 'ETH'} ${status}`));
+      } catch (error: any) {
+        console.log(chalk.red(`  Wallet ${i + 1}: Error checking balance - ${error.message}`));
+      }
+    }
+  }
+  if (!responsive) await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+}
+
+async function setMinimumBalanceThreshold(responsive = false) {
+  const { threshold } = await inquirer.prompt([
+    {
+      type: "input",
+      name: "threshold",
+      message: "Set minimum balance threshold (in ETH):",
+      default: "0.001",
+      validate: (value) => {
+        const num = parseFloat(value);
+        return !isNaN(num) && num >= 0 ? true : "Please enter a valid number >= 0";
+      }
+    }
+  ]);
+  globalMinimumBalance = parseFloat(threshold);
+  console.log(chalk.green(`✅ Minimum balance threshold set to ${threshold} ETH`));
+  logActivity({ type: 'settings', action: 'set', setting: 'minimum_balance_threshold', value: threshold });
+  if (!responsive) await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+}
+
+async function walletPrioritySettings(responsive = false) {
+  const currentKeys = loadPrivateKeysFromEnv();
+  if (currentKeys.length === 0) {
+    console.log(chalk.yellow("⚠️  No private keys found"));
+    if (!responsive) await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+    return;
+  }
+  console.log(chalk.cyan("\n🎯 Wallet Priority Settings:"));
+  console.log(chalk.cyan("Higher priority wallets will be used first for automation"));
+  const priorities = [];
+  for (let i = 0; i < currentKeys.length; i++) {
+    const wallet = new ethers.Wallet(currentKeys[i]);
+    const { priority } = await inquirer.prompt([
+      {
+        type: "input",
+        name: "priority",
+        message: `Priority for Wallet ${i + 1} (${wallet.address.substring(0, 6)}...):`,
+        default: (i + 1).toString(),
+        validate: (value) => {
+          const num = parseInt(value);
+          return !isNaN(num) && num > 0 ? true : "Please enter a valid number > 0";
+        }
+      }
+    ]);
+    priorities.push({ index: i, priority: parseInt(priority) });
+  }
+  priorities.sort((a, b) => a.priority - b.priority);
+  console.log(chalk.green("\n✅ Wallet priority order updated:"));
+  priorities.forEach((item, i) => {
+    const wallet = new ethers.Wallet(currentKeys[item.index]);
+    console.log(chalk.white(`  ${i + 1}. Wallet ${item.index + 1} (${wallet.address.substring(0, 6)}...) - Priority: ${item.priority}`));
+  });
+  logActivity({ type: 'settings', action: 'set', setting: 'wallet_priorities', priorities });
+  if (!responsive) await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+}
+
+async function autoBalanceDistribution(responsive = false) {
+  const { enabled } = await inquirer.prompt([
+    {
+      type: "list",
+      name: "enabled",
+      message: "Auto-balance distribution:",
+      choices: [
+        { name: "Enable - Automatically distribute funds between wallets", value: true },
+        { name: "Disable - Use wallets as-is", value: false }
+      ]
+    }
+  ]);
+  globalAutoBalanceDistribution = enabled;
+  console.log(chalk.green(`✅ Auto-balance distribution ${enabled ? 'enabled' : 'disabled'}`));
+  logActivity({ type: 'settings', action: 'set', setting: 'auto_balance_distribution', enabled });
+  if (!responsive) await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+}
+
+async function walletHealthCheck(responsive = false) {
+  const currentKeys = loadPrivateKeysFromEnv();
+  if (currentKeys.length === 0) {
+    console.log(chalk.yellow("⚠️  No private keys found"));
+    if (!responsive) await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+    return;
+  }
+  console.log(chalk.cyan("\n🏥 Running Wallet Health Check..."));
+  const networks = await getNetworks();
+  let healthyWallets = 0;
+  let totalWallets = currentKeys.length * networks.length;
+  for (const network of networks) {
+    console.log(chalk.green(`\n🌐 Checking ${network.name}:`));
+    const provider = new ethers.JsonRpcProvider(network.rpc, network.chainId);
+    for (let i = 0; i < currentKeys.length; i++) {
+      try {
+        const wallet = new ethers.Wallet(currentKeys[i], provider);
+        const balance = await provider.getBalance(wallet.address);
+        const balanceEth = ethers.formatEther(balance);
+        const hasBalance = parseFloat(balanceEth) > (globalMinimumBalance || 0.001);
+        if (hasBalance) {
+          console.log(chalk.green(`  ✅ Wallet ${i + 1}: Healthy (${balanceEth} ${network.nativeCurrency || 'ETH'})`));
+          healthyWallets++;
+        } else {
+          console.log(chalk.red(`  ❌ Wallet ${i + 1}: Low balance (${balanceEth} ${network.nativeCurrency || 'ETH'})`));
+        }
+      } catch (error: any) {
+        console.log(chalk.red(`  ❌ Wallet ${i + 1}: Error (${error.message})`));
+      }
+    }
+  }
+  const healthPercentage = Math.round((healthyWallets / totalWallets) * 100);
+  console.log(chalk.cyan(`\n📊 Health Summary: ${healthyWallets}/${totalWallets} wallets healthy (${healthPercentage}%)`));
+  if (healthPercentage < 50) {
+    console.log(chalk.yellow("⚠️  Consider adding funds to your wallets for better automation performance"));
+  }
+  if (!responsive) await inquirer.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+}
+
 async function main() {
-  // Setup .env and private keys
+  // Ensure .env is set up and private keys are loaded with user permission
   const privateKeys = await setupEnvAndKeys();
-  printBanner();
-  // Use the first private key by default
+  if (!privateKeys || privateKeys.length === 0) {
+    console.log('\x1b[31m%s\x1b[0m', '❌ No valid private keys found after loading .env. Please check your .env file and restart the bot.');
+    process.exit(1);
+  }
   const privateKey = privateKeys[0] || process.env.PRIVATE_KEY || "";
+
+  printBanner();
+
+  // Load networks and tokens
   const networks = await getNetworks();
   const tokens = await getTokens();
+  
+  // Go directly to main menu
   await mainMenu(networks, tokens, privateKey);
+}
+
+// Helper: Ask user to return to main menu or exit
+async function promptReturnToMainMenu(networks: any[], tokens: any[], privateKey: string) {
+  const { nextAction } = await inquirer.prompt([
+    {
+      type: "list",
+      name: "nextAction",
+      message: "Operation stopped. What would you like to do?",
+      choices: [
+        { name: "Return to Main Menu", value: "main" },
+        { name: "Exit Bot", value: "exit" }
+      ]
+    }
+  ]);
+  if (nextAction === "main") {
+    await mainMenu(networks, tokens, privateKey);
+  } else {
+    log.warn("Exiting bot.");
+    process.exit(0);
+  }
 }
 
 main(); 

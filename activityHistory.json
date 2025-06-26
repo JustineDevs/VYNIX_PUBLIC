@@ -1,0 +1,60 @@
+[
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Token Options",
+    "timestamp": "2025-06-26T00:06:53.295Z"
+  },
+  {
+    "type": "settings",
+    "setting": "private_keys",
+    "action": "setup",
+    "count": 2,
+    "timestamp": "2025-06-26T01:04:50.395Z"
+  },
+  {
+    "type": "settings",
+    "setting": "private_keys",
+    "action": "setup",
+    "count": 1,
+    "timestamp": "2025-06-26T01:06:39.074Z"
+  },
+  {
+    "type": "settings",
+    "setting": "private_keys",
+    "action": "setup",
+    "count": 1,
+    "timestamp": "2025-06-26T01:36:16.690Z"
+  },
+  {
+    "type": "settings",
+    "action": "set",
+    "setting": "auto_balance_distribution",
+    "enabled": false,
+    "timestamp": "2025-06-26T01:37:00.065Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Wallet Settings",
+    "timestamp": "2025-06-26T01:37:03.441Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Wallet Settings",
+    "timestamp": "2025-06-26T01:37:38.537Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Wallet Settings",
+    "timestamp": "2025-06-26T01:45:44.433Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Private Key Management",
+    "timestamp": "2025-06-26T01:47:36.395Z"
+  }
+]

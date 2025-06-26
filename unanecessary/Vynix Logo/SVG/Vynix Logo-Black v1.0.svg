@@ -1,0 +1,14 @@
+<svg version="1.2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
+	<title>Vynix V2</title>
+	<style>
+		tspan { white-space:pre } 
+		.s0 { fill: #000000 } 
+		.t1 { font-size: 24px;fill: #000000;font-weight: 400;font-family: "OverThere", "Over There" } 
+	</style>
+	<path id="Shape 4" class="s0" d="m280.8 455.1v22.6l-15.7 0.3 0.2-22.8zm15.5-17.1l1.8 22.2-17.7-3.9-0.2-23zm0.8 38v28h-18v-28zm-16 24v24h-16v-24zm-15-24v26l-17.6 2.3-0.4-28.3zm0-42v21l-17.7 3.4-0.3-24.4zm62 110l-5-1-1-10-25-7v-23l15 3v-19l-16-6 1-22 17 6"/>
+	<path id="Shape 1" class="s0" d="m429 558l-11 22-12 11-16 12-27 9-38-5-25-10-22-14-16-13-19-22-17-29-9-31-3-20 2-25 4-15 12-16 17-15 21-10 21-3 23-1 5 2-19-29-48-8-1 21-37 6-23-17-37 25 18 29-18 35-34 1 1 60 39 9 18 45-19 34 52 54 27-24 48 25 14 42 59-2-1-39 38-18 29 22 24-44-18-20"/>
+	<text id="VYNIX" style="transform: matrix(4.559,0,0,4.53,302.158,525.756)" >
+		<tspan x="0" y="0" class="t1">V</tspan><tspan  y="0" class="t1">Y</tspan><tspan  y="0" class="t1">N</tspan><tspan  y="0" class="t1">I</tspan><tspan  y="0" class="t1">X
+</tspan>
+	</text>
+</svg>

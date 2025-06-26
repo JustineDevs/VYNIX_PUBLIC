@@ -276,5 +276,136 @@
     "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
     "txHash": "0x193d5e6db095aaf2458de18f9b93f870d0e7473153192026be5e0b6eca78b038",
     "timestamp": "2025-06-25T21:27:35.678Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Wallet Settings",
+    "timestamp": "2025-06-26T15:55:37.459Z"
+  },
+  {
+    "type": "settings",
+    "setting": "private_keys",
+    "action": "setup",
+    "count": 1,
+    "timestamp": "2025-06-26T16:02:20.117Z"
+  },
+  {
+    "type": "swap",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.004388869989197626,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0x95fd4bd9932dc6141767abd5d64e2e7d26e1fbb477c90a4ae1017404608f0e0c",
+    "timestamp": "2025-06-26T16:03:08.558Z"
+  },
+  {
+    "type": "transfer",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0x62d84e641f05eec2ef78e02f31ff3e26ef81c9cd307351adfea4a9192a9ac165",
+    "timestamp": "2025-06-26T16:03:19.238Z"
+  },
+  {
+    "type": "swap",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC",
+    "amount": 0.00482840476627399,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0x1a99a818229ce2d93f621ed5d548bd323ff54d48a9066e9a1c33b033cc93342e",
+    "timestamp": "2025-06-26T16:06:45.250Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Wallet Settings",
+    "timestamp": "2025-06-26T16:07:17.619Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Swap Settings",
+    "details": {
+      "intervalType": "random",
+      "minInterval": 30000,
+      "maxInterval": 60000,
+      "fixedInterval": 45000,
+      "useFixedAmount": true,
+      "swapAmount": 0.1,
+      "swapAmountRange": 0.5
+    },
+    "timestamp": "2025-06-26T16:07:46.796Z"
+  },
+  {
+    "type": "settings",
+    "action": "set",
+    "setting": "minimum_balance_threshold",
+    "value": "0.001",
+    "timestamp": "2025-06-26T16:08:44.348Z"
+  },
+  {
+    "type": "settings",
+    "action": "set",
+    "setting": "wallet_priorities",
+    "priorities": [
+      {
+        "index": 0,
+        "priority": 1
+      }
+    ],
+    "timestamp": "2025-06-26T16:08:50.797Z"
+  },
+  {
+    "type": "settings",
+    "action": "set",
+    "setting": "auto_balance_distribution",
+    "enabled": true,
+    "timestamp": "2025-06-26T16:08:54.299Z"
+  },
+  {
+    "type": "settings",
+    "action": "set",
+    "setting": "auto_balance_distribution",
+    "enabled": true,
+    "timestamp": "2025-06-26T16:08:58.459Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Wallet Settings",
+    "timestamp": "2025-06-26T16:09:09.139Z"
+  },
+  {
+    "type": "settings",
+    "action": "set",
+    "setting": "minimum_balance_threshold",
+    "value": "0.001",
+    "timestamp": "2025-06-26T16:12:37.677Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Wallet Settings",
+    "timestamp": "2025-06-26T16:12:40.003Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Swap Settings",
+    "details": {
+      "intervalType": "random",
+      "minInterval": 30000,
+      "maxInterval": 60000,
+      "fixedInterval": 45000,
+      "useFixedAmount": false,
+      "swapAmount": 0.01,
+      "swapAmountRange": null
+    },
+    "timestamp": "2025-06-26T16:12:47.796Z"
   }
 ]
