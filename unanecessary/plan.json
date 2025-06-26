@@ -1,0 +1,81 @@
+{
+  "Context": "Vynix is a next-generation SaaS platform for blockchain automation, enabling users to automate testnet and mainnet activities (swaps, transfers, liquidity, deploys, check-ins, social media, and more) across multiple networks and wallets, all managed through a user-friendly interface and powered by NFT-based subscriptions.",
+  "Exemplars": {
+    "UserFlow": [
+      "User visits Vynix dashboard or runs CLI.",
+      "User connects wallet and mints a subscription NFT (selects plan, pays in crypto).",
+      "NFT is minted to user's wallet; metadata encodes plan and expiration.",
+      "User gains access to all automation features according to their plan.",
+      "On expiration, user is prompted to renew (burn/remint or update NFT).",
+      "All access control is enforced by checking NFT ownership and metadata."
+    ],
+    "KeyFeatures": [
+      "Multi-network, multi-wallet automation (Pharos, Monad, Sepolia, Polygon, BSC Testnet, etc.)",
+      "Task automation & scheduling (recurring, scheduled, custom parameters)",
+      "Social & testnet interactions (Galxe, Zealy, Layer3, Twitter, Discord)",
+      "Web dashboard for user management, analytics, and 24/7 operation",
+      "NFT-based subscription & access control (ERC-721, on-chain, no fiat)",
+      "Encrypted wallet storage, modular CLI/API, clear error handling"
+    ],
+    "ImplementationRecommendations": [
+      "Rebrand all code, menus, and docs to Vynix.",
+      "Remove all fiat/local payment logic and Stripe integration.",
+      "Integrate ERC-721 smart contract for subscription passes.",
+      "Update backend to check NFT ownership/metadata for access.",
+      "Update web dashboard and CLI to show NFT subscription status and renewal options.",
+      "Document all changes and provide clear user onboarding for NFT-based subscriptions."
+    ],
+    "FutureEnhancements": [
+      "Add support for more networks and campaign types.",
+      "Enable secondary market for subscription NFTs (optional).",
+      "Add advanced analytics, notifications, and integrations.",
+      "Explore soulbound (non-transferable) NFT options for subscriptions."
+    ]
+  },
+  "Persona": {
+    "Brand": "Vynix",
+    "Mission": "To be the most flexible, secure, and user-friendly blockchain automation SaaS, with a unique NFT-based subscription model for global accessibility and on-chain transparency.",
+    "Audience": [
+      "Crypto power users",
+      "Testnet campaigners",
+      "DeFi enthusiasts",
+      "Developers",
+      "Automation seekers"
+    ]
+  },
+  "Tone": "Professional, innovative, user-centric, and forward-thinking.",
+  "Roadmap": {
+    "1. Multi-Network, Multi-Wallet Automation": [
+      "Unlimited wallets and networks.",
+      "Parallel execution of tasks across all wallets/networks.",
+      "Network-specific task support (swap, liquidity, transfer, deploy, faucet, check-in, etc.)."
+    ],
+    "2. Task Automation & Scheduling": [
+      "Recurring and scheduled tasks.",
+      "Customizable parameters per network and wallet.",
+      "Advanced queueing and retry logic."
+    ],
+    "3. Social & Testnet Interactions": [
+      "Automated participation in testnet campaigns (Galxe, Zealy, Layer3).",
+      "Social media automation for campaign tasks.",
+      "Custom task scripting."
+    ],
+    "4. SaaS Platform & Web Dashboard": [
+      "Web dashboard for management and analytics.",
+      "24/7 operation on VPS/cloud.",
+      "Centralized activity logging with filtering."
+    ],
+    "5. NFT-Based Subscription & Access Control": [
+      "ERC-721 NFT for each subscription plan.",
+      "Metadata encodes plan, expiration, trial status.",
+      "On renewal, burn/remint or update metadata.",
+      "Backend/API checks NFT for access.",
+      "All payments in crypto, no fiat or local e-wallets."
+    ],
+    "6. Security & User Experience": [
+      "Encrypted wallet storage.",
+      "Modular CLI/API.",
+      "Clear error handling and user guidance."
+    ]
+  }
+} 
