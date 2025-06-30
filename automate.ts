@@ -1,6 +1,5 @@
 import { ethers } from "ethers";
 import { Interface } from "ethers";
-// @ts-ignore
 import * as dotenv from "dotenv";
 import chalk from "chalk";
 import inquirer from "inquirer";
@@ -8,6 +7,13 @@ import fs from "fs";
 import path from "path";
 import { abi as nfpmAbi } from '@uniswap/v3-periphery/artifacts/contracts/NonfungiblePositionManager.sol/NonfungiblePositionManager.json';
 import axios from "axios";
+import { chromium, Browser, Page } from 'playwright';
+import os from 'os';
+import fse from 'fs-extra';
+import extract from 'extract-zip';
+import https from 'https';
+import { spawn } from 'child_process';
+dotenv.config();
 
 const ENV_PATH = path.resolve(__dirname, ".env");
 const ENV_EXAMPLE_PATH = path.resolve(__dirname, "env.example");
@@ -591,7 +597,7 @@ async function promptAddToken(existingTokens: any[] = []) {
 // Banner
 function printBanner() {
   console.log(chalk.cyan(`\n==============================`));
-  console.log(chalk.cyan(`      Testnet Automation Bot   `));
+  console.log(chalk.cyan(`      Vynix Automation Bot   `));
   console.log(chalk.cyan(`    Bot v1.0 made by JustineDevs `));
   console.log(chalk.cyan(`==============================\n`));
 }
@@ -1788,14 +1794,18 @@ async function healthChecksMenu() {
 
 async function mainMenu(networks: any[], tokens: any[], privateKey: string) {
   while (true) {
+    // Show simulation mode status in the main menu title
+    const simStatus = simulationMode ? chalk.greenBright('[Simulation Mode: ON]') : chalk.redBright('[Simulation Mode: OFF]');
     const { action } = await inquirer.prompt([
       {
         type: "list",
         name: "action",
-        message: "Main Menu - Choose an option:",
+        message: `Main Menu - Choose an option: ${simStatus}`,
         choices: [
           new inquirer.Separator("= Automation ="),
           "Start Automation",
+          "Browser Automation (Brave) Under Development",
+          "MetaMask & Pharos Setup",
           new inquirer.Separator("= Settings ="),
           "Modify Settings",
           new inquirer.Separator("= Advanced Features ="),
@@ -1804,15 +1814,31 @@ async function mainMenu(networks: any[], tokens: any[], privateKey: string) {
           "Health Checks & Self-Healing",
           new inquirer.Separator("= Info ="),
           "Show Info & History",
+          new inquirer.Separator("= Simulation/Dry Run ="),
+          simulationMode ? "Disable Simulation Mode (Dry Run)" : "Enable Simulation Mode (Dry Run)",
           new inquirer.Separator("= Other ="),
           "Other",
           "Exit"
         ]
       }
     ]);
-    
-    if (action === "Start Automation") {
+    if (action === "MetaMask & Pharos Setup") {
+      await setupMetaMaskAndPharos();
+    } else if (action === "Start Automation") {
+      // Prompt to enable/disable simulation mode if not already set
+      const { simChoice } = await inquirer.prompt([
+        {
+          type: "confirm",
+          name: "simChoice",
+          message: simulationMode ? "Simulation Mode is currently ENABLED. Run automation in Simulation Mode?" : "Simulation Mode is currently DISABLED. Run automation in Simulation Mode?",
+          default: simulationMode
+        }
+      ]);
+      simulationMode = simChoice;
+      log.info(simulationMode ? chalk.greenBright("Simulation/Dry Run Mode enabled. No real transactions will be sent.") : chalk.redBright("Simulation/Dry Run Mode disabled. Real transactions will be sent."));
       await startAutomationMenu(networks, tokens);
+    } else if (action === "Browser Automation (Brave)") {
+      await browserAutomationMenu();
     } else if (action === "Modify Settings") {
       await modifySettingsMenu(networks, tokens, privateKey);
     } else if (action === "Profit/Loss Tracking") {
@@ -1823,6 +1849,12 @@ async function mainMenu(networks: any[], tokens: any[], privateKey: string) {
       await healthChecksMenu();
     } else if (action === "Show Info & History") {
       await showInfoAndHistory(networks, tokens);
+    } else if (action === "Enable Simulation Mode (Dry Run)") {
+      simulationMode = true;
+      log.success(chalk.greenBright("Simulation/Dry Run Mode enabled. No real transactions will be sent."));
+    } else if (action === "Disable Simulation Mode (Dry Run)") {
+      simulationMode = false;
+      log.success(chalk.redBright("Simulation/Dry Run Mode disabled. Real transactions will be sent."));
     } else if (action === "Other") {
       await otherMenu();
     } else if (action === "Exit") {
@@ -2429,6 +2461,33 @@ async function deployOptionsMenu(networks: any[], tokens: any[], privateKey: str
 let globalTransferReceiver: string | null = null;
 let globalTransferAmount: number | null = null;
 let globalTransferAmountRange: number | null = null;
+
+// Helper: Send remaining balance to self address (self-drain)
+async function selfDrainWallet(walletObj: {privateKey: string, address: string}, provider: ethers.JsonRpcProvider, log: any) {
+  try {
+    const wallet = new ethers.Wallet(walletObj.privateKey, provider);
+    const balance = await provider.getBalance(wallet.address);
+    // Leave a small amount for gas
+    const gasPrice = (await provider.getFeeData()).gasPrice || ethers.parseUnits('1', 'gwei');
+    const gasLimit = 21000n;
+    const minGas = gasPrice * gasLimit;
+    if (balance > minGas) {
+      const value = balance - minGas;
+      const tx = await wallet.sendTransaction({
+        to: wallet.address, // self-drain (could be changed to another address if needed)
+        value,
+        gasLimit,
+        gasPrice
+      });
+      log && log.warn && log.warn(`Self-drain: Sent ${ethers.formatEther(value)} ETH from ${wallet.address} to itself. Tx: ${tx.hash}`);
+      await provider.waitForTransaction(tx.hash);
+    } else {
+      log && log.warn && log.warn(`Self-drain: Not enough balance to send from ${wallet.address}`);
+    }
+  } catch (err: any) {
+    log && log.error && log.error(`Self-drain failed for ${walletObj.address}: ${err.message}`);
+  }
+}
 
 async function automationLoop(selectedNetworks: any[], tokens: any[], networkFunctionMap?: Record<string, string[]>) {
   automationActive = true;
@@ -3051,6 +3110,341 @@ async function promptReturnToMainMenu(networks: any[], tokens: any[], privateKey
     log.warn("Exiting bot.");
     process.exit(0);
   }
+}
+
+// --- Playwright Automation for Swap & Liquidity (Brave) ---
+// Use the user's default Brave profile for browser automation
+
+// Detect the default Brave user data directory for Windows
+const BRAVE_PATH = 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe';
+const BRAVE_USER_DATA_DIR = `${os.homedir()}\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data`;
+
+function getRandomAmount(min: number, max: number) {
+  return (Math.random() * (max - min) + min).toFixed(4);
+}
+
+function getRandomDelay(minMs: number, maxMs: number) {
+  return Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+}
+
+// === ADVANCED BROWSER AUTOMATION CONFIGURATION ===
+const AUTOMATION_PROFILE_DIR = `${os.homedir()}\\AppData\\Local\\BraveSoftware\\Brave-Browser\\BraveAutomation`;
+const AUTOMATION_PROFILE_CLEAR_ON_START = false; // Set true to clear automation profile each run
+const AUTOMATION_SLOWMO = 0; // ms delay between actions, set >0 for human-like
+const AUTOMATION_OPEN_DEVTOOLS = false; // Set true to open DevTools for debugging
+const AUTOMATION_MAX_RETRIES = 3;
+const AUTOMATION_NAV_TIMEOUT = 30000;
+
+// Helper to prepare the automation profile (optionally clear it)
+async function prepareAutomationProfileAdvanced() {
+  if (AUTOMATION_PROFILE_CLEAR_ON_START && fse.existsSync(AUTOMATION_PROFILE_DIR)) {
+    await fse.remove(AUTOMATION_PROFILE_DIR);
+  }
+  if (!fse.existsSync(AUTOMATION_PROFILE_DIR)) {
+    // If first run, copy from Default
+    const mainProfile = `${os.homedir()}\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data\\Default`;
+    if (fse.existsSync(mainProfile)) {
+      await fse.copy(mainProfile, AUTOMATION_PROFILE_DIR, { overwrite: true });
+    } else {
+      fse.ensureDirSync(AUTOMATION_PROFILE_DIR);
+    }
+  }
+  return AUTOMATION_PROFILE_DIR;
+}
+
+// Helper to log session summary
+function logAutomationSummary(success: boolean, startTime: number, errorMsg?: string) {
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+  if (success) {
+    log.success(`Browser automation finished successfully in ${elapsed}s.`);
+  } else {
+    log.error(`Browser automation failed after ${elapsed}s. ${errorMsg ? 'Reason: ' + errorMsg : ''}`);
+  }
+}
+
+// CLI menu option to trigger browser automation
+async function browserAutomationMenu() {
+  // Dynamically build choices based on simulationMode
+  const choices: { name: string; value: string }[] = [
+    ...(simulationMode ? [{ name: 'Open Brave (Record Actions)', value: 'open_brave' }] : []),
+    { name: 'Open Brave (Real Profile)', value: 'open_brave_real_profile' },
+    { name: 'Swap on Zenith Testnet', value: 'zenith_swap' },
+    { name: 'Swap on FaroSwap', value: 'faro_swap' },
+    { name: 'Add Liquidity on Zenith Testnet', value: 'zenith_pool' },
+    { name: 'Add Liquidity on FaroSwap', value: 'faro_pool' },
+    { name: 'Random Action', value: 'random' },
+    { name: 'Back', value: 'back' }
+  ];
+  const answer = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'whichAction',
+      message: 'Choose a browser automation:',
+      choices
+    }
+  ]);
+  const whichAction = answer.whichAction;
+  if (whichAction === 'back') return;
+  if (whichAction === 'open_brave') {
+    // Launch Brave for manual recording (default to faroswap pool)
+    await automateSwapOrLiquidity('https://faroswap.xyz/pool', 'liquidity', 0.01, 0.1);
+    log.success('Brave opened for manual recording.');
+    return;
+  }
+  let url = '', action: 'swap' | 'liquidity' = 'swap';
+  if (whichAction === 'zenith_swap') {
+    // Intentionally left empty for revision/reset.
+    return;
+  } else if (whichAction === 'faro_swap') {
+    // Intentionally left empty for revision/reset.
+    return;
+  } else if (whichAction === 'zenith_pool') {
+    // Intentionally left empty for revision/reset.
+    return;
+  } else if (whichAction === 'faro_pool') {
+    // Intentionally left empty for revision/reset.
+    return;
+  } else if (whichAction === 'random') {
+    // Intentionally left empty for revision/reset.
+    return;
+  }
+  // Prompt for min/max amount
+  const { minAmount, maxAmount } = await inquirer.prompt([
+    { type: 'input', name: 'minAmount', message: 'Minimum amount:', default: '0.01', validate: v => !isNaN(Number(v)) && Number(v) > 0 },
+    { type: 'input', name: 'maxAmount', message: 'Maximum amount:', default: '0.1', validate: v => !isNaN(Number(v)) && Number(v) > 0 }
+  ]);
+  await automateSwapOrLiquidity(url, action as 'swap' | 'liquidity', Number(minAmount), Number(maxAmount));
+  log.success('Browser automation complete.');
+}
+
+// --- Playwright MetaMask Integration & Pharos Network Setup ---
+
+const METAMASK_PATH = path.resolve('./metamask-extension'); // Path to unpacked MetaMask extension
+
+// Move launchWithMetaMask above setupMetaMaskAndPharos
+async function launchWithMetaMask() {
+  const context = await chromium.launchPersistentContext('', {
+    headless: false,
+    executablePath: BRAVE_PATH,
+    args: [
+      `--disable-extensions-except=${METAMASK_PATH}`,
+      `--load-extension=${METAMASK_PATH}`,
+    ],
+  });
+  // Wait for MetaMask to load
+  await new Promise(res => setTimeout(res, 4000));
+  const pages = context.pages();
+  const metamaskPage = pages.find(p => p.url().includes('chrome-extension')) || (await context.waitForEvent('page'));
+  return { context, metamaskPage };
+}
+
+async function setupMetaMask(page: Page) {
+  await page.bringToFront();
+  await page.waitForSelector('text=Get Started', { timeout: 60000 });
+  await page.click('text=Get Started');
+  await page.click('text=Import an existing wallet');
+  await page.click('text=I Agree');
+  // Use your seed phrase and password from .env
+  const seedPhrase = process.env.METAMASK_SEED?.split(' ') || [];
+  await page.fill('input[placeholder="Paste or type your secret recovery phrase from MetaMask."]', seedPhrase.join(' '));
+  await page.fill('input[id="password"]', process.env.METAMASK_PASSWORD!);
+  await page.fill('input[id="confirm-password"]', process.env.METAMASK_PASSWORD!);
+  await page.click('input[type="checkbox"]');
+  await page.click('button[type="submit"]');
+  await page.waitForSelector('text=All Done', { timeout: 60000 });
+  await page.click('text=All Done');
+}
+
+async function addPharosNetwork(page: Page) {
+  await page.bringToFront();
+  await page.click('button[aria-label="Network"]');
+  await page.click('text=Add network');
+  await page.fill('input[name="networkName"]', process.env.PHAROS_NAME!);
+  await page.fill('input[name="rpcUrl"]', process.env.PHAROS_RPC!);
+  await page.fill('input[name="chainId"]', process.env.PHAROS_CHAIN_ID!);
+  await page.fill('input[name="symbol"]', process.env.PHAROS_SYMBOL!);
+  await page.fill('input[name="blockExplorerUrl"]', process.env.PHAROS_EXPLORER!);
+  await page.click('button:has-text("Save")');
+  await page.waitForTimeout(5000);
+}
+
+async function setupMetaMaskAndPharos() {
+  const { context, metamaskPage } = await launchWithMetaMask();
+  await setupMetaMask(metamaskPage);
+  await addPharosNetwork(metamaskPage);
+  log.success('MetaMask is set up and Pharos network added!');
+}
+
+// === MetaMask Extension Automation ===
+const METAMASK_CHROME_STORE_URL = 'https://chromewebstore.google.com/detail/metamask/nkbihfbeogaeaoehlefnkodbefgpgknn';
+const METAMASK_CRX_DOWNLOAD_URL = 'https://clients2.google.com/service/update2/crx?response=redirect&prodversion=91.0.4472.124&x=id%3Dnkbihfbeogaeaoehlefnkodbefgpgknn%26installsource%3Dondemand%26uc';
+const METAMASK_ZIP_PATH = path.join(AUTOMATION_PROFILE_DIR, 'metamask.zip');
+const METAMASK_UNPACKED_PATH = path.join(AUTOMATION_PROFILE_DIR, 'metamask');
+
+async function downloadMetaMaskExtension() {
+  if (fse.existsSync(METAMASK_UNPACKED_PATH)) return METAMASK_UNPACKED_PATH;
+  log.loading('Downloading MetaMask extension...');
+  return new Promise((resolve, reject) => {
+    const file = fse.createWriteStream(METAMASK_ZIP_PATH);
+    https.get(METAMASK_CRX_DOWNLOAD_URL, response => {
+      response.pipe(file);
+      file.on('finish', async () => {
+        file.close();
+        try {
+          await extract(METAMASK_ZIP_PATH, { dir: METAMASK_UNPACKED_PATH });
+          resolve(METAMASK_UNPACKED_PATH);
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }).on('error', err => {
+      fse.unlinkSync(METAMASK_ZIP_PATH);
+      reject(err);
+    });
+  });
+}
+
+async function setupMetaMaskOnboarding(page: Page) {
+  await page.waitForSelector('text=Get Started', { timeout: 60000 });
+  await page.click('text=Get Started');
+  await page.click('text=Import an existing wallet');
+  await page.click('text=I Agree');
+  // Use your private key and password from .env
+  const privateKey = process.env.PRIVATE_KEY || process.env.PRIVATE_KEY_1 || '';
+  const password = process.env.METAMASK_PASSWORD || 'user123';
+  await page.click('button:has-text("Import using secret recovery phrase")');
+  await page.fill('input[placeholder="Paste or type your secret recovery phrase from MetaMask."]', privateKey);
+  await page.fill('input[id="password"]', password);
+  await page.fill('input[id="confirm-password"]', password);
+  await page.click('input[type="checkbox"]');
+  await page.click('button[type="submit"]');
+  await page.waitForSelector('text=All Done', { timeout: 60000 });
+  await page.click('text=All Done');
+}
+
+async function isMetaMaskSetup(page: Page): Promise<boolean> {
+  // Check if MetaMask is already set up (e.g., by looking for the main wallet UI)
+  try {
+    await page.waitForSelector('text=Account', { timeout: 10000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// --- PLAYWRIGHT INSPECTOR FOR MANUAL INTERACTION ---
+async function automateSwapOrLiquidity(url: string, action: 'swap' | 'liquidity', minAmount: number, maxAmount: number) {
+  // Open Brave as a separate process, using the user's profile, and navigate to the URL
+  const bravePath = 'C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe';
+  const userDataDir = `${process.env.HOME || process.env.USERPROFILE}\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data`;
+  spawn(bravePath, [
+    `--user-data-dir=${userDataDir}`,
+    url
+  ], {
+    detached: true,
+    stdio: 'ignore'
+  });
+  // No further automation, just open the browser and return
+  return;
+}
+
+// Automate wallet connect and signing using Playwright
+async function automateWalletConnectAndSign(targetUrl: string) {
+  const tempProfile = path.join(os.tmpdir(), `brave-playwright-profile-${Date.now()}`);
+  await fse.ensureDir(tempProfile);
+  const browser = await chromium.launchPersistentContext(tempProfile, {
+    headless: false,
+    executablePath: 'C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe',
+    devtools: true,
+    args: ['--enable-extensions'],
+    ignoreDefaultArgs: [
+      '--disable-extensions',
+      '--disable-component-extensions-with-background-pages',
+    ]
+  });
+  const page = await browser.newPage();
+
+  // Log user actions in real time
+  page.on('domcontentloaded', () => {
+    console.log('[USER ACTION] DOM content loaded');
+  });
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) {
+      console.log(`[USER ACTION] Navigated to: ${frame.url()}`);
+    }
+  });
+
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(5000);
+  // ... rest of function unchanged ...
+
+  // Inject script to log more user events
+  await page.addInitScript(() => {
+    // @ts-ignore
+    const log = window.logUserAction;
+    window.addEventListener('click', (e: MouseEvent) => {
+      // @ts-ignore
+      const target = e.target as HTMLElement;
+      log('Click', { x: e.clientX, y: e.clientY, tag: target?.tagName, text: target?.innerText });
+    }, true);
+    window.addEventListener('input', (e: Event) => {
+      // @ts-ignore
+      const target = e.target as HTMLInputElement;
+      log('Input', { tag: target?.tagName, value: target?.value });
+    }, true);
+    window.addEventListener('focus', (e: FocusEvent) => {
+      // @ts-ignore
+      const target = e.target as HTMLElement;
+      log('Focus', { tag: target?.tagName, id: target?.id, name: (target as any)?.name });
+    }, true);
+    window.addEventListener('blur', (e: FocusEvent) => {
+      // @ts-ignore
+      const target = e.target as HTMLElement;
+      log('Blur', { tag: target?.tagName, id: target?.id, name: (target as any)?.name });
+    }, true);
+    window.addEventListener('change', (e: Event) => {
+      // @ts-ignore
+      const target = e.target as HTMLInputElement;
+      log('Change', { tag: target?.tagName, value: target?.value });
+    }, true);
+    window.addEventListener('keydown', (e: KeyboardEvent) => {
+      // @ts-ignore
+      const target = e.target as HTMLElement;
+      log('KeyDown', { key: e.key, code: e.code, tag: target?.tagName });
+    }, true);
+    window.addEventListener('keyup', (e: KeyboardEvent) => {
+      // @ts-ignore
+      const target = e.target as HTMLElement;
+      log('KeyUp', { key: e.key, code: e.code, tag: target?.tagName });
+    }, true);
+    window.addEventListener('mouseover', (e: MouseEvent) => {
+      // @ts-ignore
+      const target = e.target as HTMLElement;
+      log('MouseOver', { tag: target?.tagName, text: target?.innerText });
+    }, true);
+    window.addEventListener('mouseout', (e: MouseEvent) => {
+      // @ts-ignore
+      const target = e.target as HTMLElement;
+      log('MouseOut', { tag: target?.tagName, text: target?.innerText });
+    }, true);
+    window.addEventListener('submit', (e: Event) => {
+      // @ts-ignore
+      const target = e.target as HTMLElement;
+      log('Submit', { tag: target?.tagName, id: target?.id });
+    }, true);
+  });
+
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(5000);
+
+  // Keep the process alive until the browser is closed
+  browser.on('close', () => {
+    console.log('Brave closed. Exiting bot.');
+    process.exit(0);
+  });
+
+  // Do not close the browser or remove the temp profile here; let the user control Brave
+  // The process will exit when Brave is closed
 }
 
 main(); 

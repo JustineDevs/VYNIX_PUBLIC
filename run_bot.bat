@@ -6,6 +6,6 @@ REM Optional: Activate Node.js environment if needed
 REM call "C:\path\to\your\nodejs\setup.bat"
 
 REM Run the bot in a new window and keep the window open after execution
-start "Testnet Automation Bot" cmd /k "npx ts-node automate.ts"
+start "Testnet Automation Bot" cmd /k "node dist/automate.js"
 
 pause 
