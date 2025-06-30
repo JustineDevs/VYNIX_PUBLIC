@@ -1,4 +1,6 @@
 @echo off
+REM First Published by JustineDevs
+
 REM Batch file to run the Testnet Automation Bot in a new terminal window and keep it open
 cd /d "%~dp0"
 

@@ -1,3 +1,5 @@
+// First Published by JustineDevs
+
 import { ethers } from "ethers";
 import { Interface } from "ethers";
 import * as dotenv from "dotenv";

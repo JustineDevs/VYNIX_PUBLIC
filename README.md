@@ -1,3 +1,4 @@
+<!-- First Published by JustineDevs -->
 # Vynix Bot - Testnet Automation
 
 ## Overview
@@ -6,6 +7,11 @@ Welcome to Vynix Bot! This is a powerful and interactive Testnet Automation Bot 
 
 What makes Vynix Bot unique is its blend of powerful automation and deep customization. With features like **Simulation Mode**, you can dry-run complex interactions without spending real assets. The **Custom Contract Interaction** module allows you to call any function on any contract, providing ultimate flexibility. Finally, its **Smart Swap Logic** and **Centralized Activity Tracking** ensure your testnet tasks are both efficient and transparent.
 
+## Support the Project
+
+If you find this bot useful, please consider giving the repository a star on GitHub! It helps motivate the developers and provides visibility to the project.
+
+⭐ **[Star the repository on GitHub](https://github.com/JustineDevs/Vynix_Bot)** ⭐
 ---
 
 ### **Table of Contents**
@@ -123,12 +129,6 @@ If you have a suggestion that would make this better, please fork the repo and c
 3.  **Commit your Changes** (`git commit -m 'Add some AmazingFeature'`)
 4.  **Push to the Branch** (`git push origin feature/AmazingFeature`)
 5.  **Open a Pull Request**
-
-## Support the Project
-
-If you find this bot useful, please consider giving the repository a star on GitHub! It helps motivate the developers and provides visibility to the project.
-
-⭐ **[Star the repository on GitHub](https://github.com/JustineDevs/Vynix_Bot)** ⭐
 
 ## MVP (Minimum Viable Product)
 
