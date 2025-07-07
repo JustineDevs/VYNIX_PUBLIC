@@ -11,7 +11,7 @@ What makes Vynix Bot unique is its blend of powerful automation and deep customi
 
 If you find this bot useful, please consider giving the repository a star on GitHub! It helps motivate the developers and provides visibility to the project.
 
-⭐ **[Star the repository on GitHub](https://github.com/JustineDevs/Vynix_Bot)** ⭐
+⭐ **[Star the repository on GitHub](https://github.com/JustineDevs/Vynix_Public)** ⭐
 ---
 
 ### **Table of Contents**
