@@ -1,6 +1,5 @@
-// First Published by JustineDevs
-
 "use strict";
+// First Published by JustineDevs
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
     var desc = Object.getOwnPropertyDescriptor(m, k);
@@ -51,25 +50,9 @@ const fs_extra_1 = __importDefault(require("fs-extra"));
 const extract_zip_1 = __importDefault(require("extract-zip"));
 const https_1 = __importDefault(require("https"));
 const child_process_1 = require("child_process");
-dotenv.config();
 const ENV_PATH = path_1.default.resolve(__dirname, ".env");
 const ENV_EXAMPLE_PATH = path_1.default.resolve(__dirname, "env.example");
-// Robust dotenv loading: try both script dir and project root
-(function robustDotenvLoad() {
-    const scriptEnv = path_1.default.resolve(__dirname, ".env");
-    const rootEnv = path_1.default.resolve(process.cwd(), ".env");
-    if (fs_1.default.existsSync(scriptEnv)) {
-        dotenv.config({ path: scriptEnv });
-        console.log(`Loaded .env from: ${scriptEnv}`);
-    }
-    else if (fs_1.default.existsSync(rootEnv)) {
-        dotenv.config({ path: rootEnv });
-        console.log(`Loaded .env from: ${rootEnv}`);
-    }
-    else {
-        console.log("No .env file found in script or project root.");
-    }
-})();
+dotenv.config();
 const NETWORKS_PATH = path_1.default.resolve(__dirname, "networks.json");
 const TOKENS_PATH = path_1.default.resolve(__dirname, "tokens.json");
 const SWAP_HISTORY_PATH = path_1.default.resolve(__dirname, "swapHistory.json");
@@ -125,10 +108,6 @@ function validatePrivateKey(privateKey) {
     // Check if it's not all zeros (common invalid key)
     if (privateKey === '0x0000000000000000000000000000000000000000000000000000000000000000') {
         return { isValid: false, error: "Private key cannot be all zeros" };
-    }
-    // Check if it's not the example key from env.example
-    if (privateKey === '0x0000000000000000000000000000000000000000000000000000000000000000') {
-        return { isValid: false, error: "Please replace the example private key with your actual private key" };
     }
     return { isValid: true };
 }
@@ -201,6 +180,27 @@ function loadPrivateKeysFromEnv() {
 // Add global variables to track all available wallets and their balances
 let allWallets = [];
 let currentWalletIndex = 0;
+// Helper: Retry async function with exponential backoff for busy RPC errors
+async function withRetry(fn, retries = 5, delayMs = 1000) {
+    let lastErr;
+    for (let i = 0; i < retries; i++) {
+        try {
+            return await fn();
+        }
+        catch (err) {
+            // Check for busy RPC error
+            if (err?.code === -32603 || (err?.message && err.message.includes('The service was busy'))) {
+                lastErr = err;
+                if (i < retries - 1) {
+                    await new Promise(res => setTimeout(res, delayMs * Math.pow(2, i)));
+                    continue;
+                }
+            }
+            throw err;
+        }
+    }
+    throw lastErr;
+}
 // Function to initialize all wallets from private keys
 async function initializeWallets(provider) {
     const privateKeys = loadPrivateKeysFromEnv();
@@ -208,7 +208,8 @@ async function initializeWallets(provider) {
     for (const pk of privateKeys) {
         try {
             const wallet = new ethers_1.ethers.Wallet(pk, provider);
-            const balance = await provider.getBalance(wallet.address);
+            // Use retry logic for getBalance
+            const balance = await withRetry(() => provider.getBalance(wallet.address));
             const hasBalance = balance > ethers_1.ethers.parseEther("0.0001"); // Minimum balance threshold
             allWallets.push({
                 privateKey: pk,
@@ -240,7 +241,8 @@ async function updateWalletBalance(address, provider) {
     const walletIndex = allWallets.findIndex(w => w.address === address);
     if (walletIndex !== -1) {
         try {
-            const balance = await provider.getBalance(address);
+            // Use retry logic for getBalance
+            const balance = await withRetry(() => provider.getBalance(address));
             allWallets[walletIndex].balance = balance;
             allWallets[walletIndex].hasBalance = balance > ethers_1.ethers.parseEther("0.0001");
         }
@@ -1317,7 +1319,7 @@ async function runTransfer({ net, provider, privateKeys, walletIndex, simulation
             maxPriorityFeePerGas: feeData.maxPriorityFeePerGas || undefined,
         });
         log.loading(`Transfer transaction sent, waiting for confirmation...`);
-        const receipt = await provider.waitForTransaction(tx.hash);
+        const receipt = await withRetry(() => provider.waitForTransaction(tx.hash));
         log.success(`Transfer completed: ${receipt.hash}`);
         log.step(`Explorer: https://testnet.pharosscan.xyz/tx/${receipt.hash}`);
         logActivity({ type: 'transfer', status: 'success', network: net.name, receiver: toAddress, txHash: receipt.hash });
@@ -2089,11 +2091,15 @@ async function privateKeyManagementMenu() {
                         else {
                             const newKeyIndex = currentKeys.length + 1;
                             const envVars = {};
+                            // Add all current keys and the new one
+                            currentKeys.forEach((k, i) => envVars[`PRIVATE_KEY_${i + 1}`] = k);
                             envVars[`PRIVATE_KEY_${newKeyIndex}`] = normalizedPk;
                             saveEnv(envVars);
                             console.log(chalk_1.default.green(`✅ Private key added as PRIVATE_KEY_${newKeyIndex}`));
                             console.log(chalk_1.default.cyan("This wallet will be used in automation if it has sufficient balance."));
+                            console.log(chalk_1.default.cyan("New wallets will be detected and used automatically on the next automation run."));
                             dotenv.config(); // Reload environment
+                            loadPrivateKeysFromEnv();
                             break;
                         }
                     }
@@ -2124,9 +2130,9 @@ async function privateKeyManagementMenu() {
                         const normalizedPk = pk.startsWith('0x') ? pk : '0x' + pk;
                         const validation = validatePrivateKey(normalizedPk);
                         if (validation.isValid) {
-                            // Check if key already exists in current keys
-                            if (currentKeys.includes(normalizedPk)) {
-                                console.log(chalk_1.default.yellow("⚠️  This private key already exists in your .env file"));
+                            // Check if key already exists in current keys or addedKeys
+                            if (currentKeys.includes(normalizedPk) || addedKeys.includes(normalizedPk)) {
+                                console.log(chalk_1.default.yellow("⚠️  This private key already exists in your .env file or was just added"));
                                 const { retry } = await inquirer_1.default.prompt([
                                     { type: "confirm", name: "retry", message: "Try a different key?", default: true }
                                 ]);
@@ -2160,16 +2166,18 @@ async function privateKeyManagementMenu() {
                     }
                 }
                 if (addedKeys.length > 0) {
-                    // Save all added keys
+                    // Save all current keys and new keys
                     const envVars = {};
-                    addedKeys.forEach((key, index) => {
-                        const newKeyIndex = currentKeys.length + index + 1;
-                        envVars[`PRIVATE_KEY_${newKeyIndex}`] = key;
+                    const allKeys = [...currentKeys, ...addedKeys];
+                    allKeys.forEach((key, index) => {
+                        envVars[`PRIVATE_KEY_${index + 1}`] = key;
                     });
                     saveEnv(envVars);
                     console.log(chalk_1.default.green(`✅ Successfully added ${addedKeys.length} new private key(s)`));
                     console.log(chalk_1.default.cyan("All new wallets will be used in automation if they have sufficient balance."));
+                    console.log(chalk_1.default.cyan("New wallets will be detected and used automatically on the next automation run."));
                     dotenv.config(); // Reload environment
+                    loadPrivateKeysFromEnv();
                 }
             }
         }
@@ -3471,5 +3479,55 @@ async function automateWalletConnectAndSign(targetUrl) {
     });
     // Do not close the browser or remove the temp profile here; let the user control Brave
     // The process will exit when Brave is closed
+}
+// Menu: Faucet & Daily Check-in for All Wallets
+async function faucetAndCheckinAllWalletsMenu() {
+    const privateKeys = loadPrivateKeysFromEnv();
+    if (privateKeys.length === 0) {
+        console.log(chalk_1.default.yellow("⚠️  No private keys found"));
+        await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+        return;
+    }
+    const networks = await getNetworks();
+    if (!networks.length) {
+        console.log(chalk_1.default.red("❌ No networks found."));
+        await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to continue" }]);
+        return;
+    }
+    // Let user select network
+    const { selectedNetwork } = await inquirer_1.default.prompt([
+        {
+            type: "list",
+            name: "selectedNetwork",
+            message: "Select network to run Faucet & Check-in for all wallets:",
+            choices: networks.map((n) => ({ name: n.name, value: n }))
+        }
+    ]);
+    const provider = new ethers_1.ethers.JsonRpcProvider(selectedNetwork.rpc, selectedNetwork.chainId);
+    let faucetSuccess = 0, checkinSuccess = 0;
+    for (let i = 0; i < privateKeys.length; i++) {
+        const wallet = new ethers_1.ethers.Wallet(privateKeys[i], provider);
+        console.log(chalk_1.default.cyan(`\nWallet ${i + 1}: ${wallet.address}`));
+        // Faucet
+        const faucetResult = await claimFaucetTS(wallet, console);
+        if (faucetResult) {
+            faucetSuccess++;
+            console.log(chalk_1.default.green("  ✅ Faucet claimed successfully."));
+        }
+        else {
+            console.log(chalk_1.default.yellow("  ⚠️  Faucet claim failed or not available."));
+        }
+        // Daily Check-in
+        const checkinResult = await performCheckInTS(wallet, console);
+        if (checkinResult) {
+            checkinSuccess++;
+            console.log(chalk_1.default.green("  ✅ Daily check-in successful."));
+        }
+        else {
+            console.log(chalk_1.default.yellow("  ⚠️  Daily check-in failed or already checked in."));
+        }
+    }
+    console.log(chalk_1.default.cyan(`\nSummary: Faucet success: ${faucetSuccess}/${privateKeys.length}, Check-in success: ${checkinSuccess}/${privateKeys.length}`));
+    await inquirer_1.default.prompt([{ type: "input", name: "back", message: "Press Enter to return to menu" }]);
 }
 main();

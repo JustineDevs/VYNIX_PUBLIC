@@ -1,0 +1,6 @@
+id,name,chain_id,rpc_url,explorer_url,native_currency,is_active,created_at,updated_at
+62410fda-a684-408b-82c2-45d7c577355d,Pharos Testnet,1337,https://rpc.pharos.testnet,https://explorer.pharos.testnet,"{""name"": ""Pharos"", ""symbol"": ""PHR"", ""decimals"": 18}",t,2025-06-30 12:17:56.986175+00,2025-06-30 12:17:56.986175+00
+4baee2f7-691f-4088-bb26-d48369ecc941,Monad Testnet,1338,https://rpc.monad.testnet,https://explorer.monad.testnet,"{""name"": ""Monad"", ""symbol"": ""MON"", ""decimals"": 18}",t,2025-06-30 12:17:56.986175+00,2025-06-30 12:17:56.986175+00
+35152cb2-f704-4a58-b942-0e29a905ec7b,Ethereum Sepolia,11155111,https://sepolia.infura.io/v3/YOUR_PROJECT_ID,https://sepolia.etherscan.io,"{""name"": ""Ethereum"", ""symbol"": ""ETH"", ""decimals"": 18}",t,2025-06-30 12:17:56.986175+00,2025-06-30 12:17:56.986175+00
+86e76256-af50-4486-a76a-717ce8831f18,Polygon Mumbai,80001,https://polygon-mumbai.infura.io/v3/YOUR_PROJECT_ID,https://mumbai.polygonscan.com,"{""name"": ""MATIC"", ""symbol"": ""MATIC"", ""decimals"": 18}",t,2025-06-30 12:17:56.986175+00,2025-06-30 12:17:56.986175+00
+82f313de-115a-4dc5-8c42-c5a5f1e423b4,BSC Testnet,97,https://data-seed-prebsc-1-s1.binance.org:8545,https://testnet.bscscan.com,"{""name"": ""BNB"", ""symbol"": ""tBNB"", ""decimals"": 18}",t,2025-06-30 12:17:56.986175+00,2025-06-30 12:17:56.986175+00

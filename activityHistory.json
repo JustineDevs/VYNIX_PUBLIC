@@ -56,5 +56,113 @@
     "action": "modify",
     "setting": "Private Key Management",
     "timestamp": "2025-06-26T01:47:36.395Z"
+  },
+  {
+    "type": "swap",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC_NEW",
+    "amount": 0.003284902534307601,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0x7e95efa1c2d4f4b1527144f3790375ab8021390f7fb0ea6655991706caa846d2",
+    "timestamp": "2025-07-06T23:17:16.837Z"
+  },
+  {
+    "type": "transfer",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0x0d80786091c592bf8e2b6ae34fda3cc8be4801ecab3d1efd23420808bc583c0f",
+    "timestamp": "2025-07-06T23:17:35.085Z"
+  },
+  {
+    "type": "swap",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC_NEW",
+    "amount": 0.001786566575110075,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0xa3dafdffd1408a38890036616551c914c4d96173ec592d9af3a91aedc10e19a3",
+    "timestamp": "2025-07-06T23:19:04.196Z"
+  },
+  {
+    "type": "transfer",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0xd1127ad8969bd20a98337e990c69b004b360b6f24bd9e2891f83946acf8ba395",
+    "timestamp": "2025-07-06T23:19:13.305Z"
+  },
+  {
+    "type": "swap",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC_NEW",
+    "amount": 0.005528522767865254,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0xa88b038f9723f3c91d292d092bd893f9a7c9d1125a12fe277cb1f9e6825533b4",
+    "timestamp": "2025-07-06T23:21:24.997Z"
+  },
+  {
+    "type": "transfer",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0x5d394d0ef07c5aa51f13d4176f9c547fdb2eef734bf5bb40b46773e9e102f4db",
+    "timestamp": "2025-07-06T23:21:34.228Z"
+  },
+  {
+    "type": "swap",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC_NEW",
+    "amount": 0.001241923046355783,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0xd888494205c4139119ff546a85fab3f708a1e5f56956284f3b12a7a244d504f3",
+    "timestamp": "2025-07-06T23:23:01.927Z"
+  },
+  {
+    "type": "transfer",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0xe33d82657a473ea3e15c2278f706043479d630c1f43956e58afd0c862e3d63d6",
+    "timestamp": "2025-07-06T23:23:11.390Z"
+  },
+  {
+    "type": "swap",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "from": "WPHRS",
+    "to": "USDC_NEW",
+    "amount": 0.004951795528345246,
+    "wallet": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0x70bee8b71763cda19153651dd35e4833c876a170e049be8757dc40ed80e50efe",
+    "timestamp": "2025-07-06T23:24:33.112Z"
+  },
+  {
+    "type": "transfer",
+    "status": "success",
+    "network": "Pharos Testnet",
+    "receiver": "0x44604bb3A940E93E644ae03A96b876dF1417F750",
+    "txHash": "0xba2d2742f9aedd629774fd159aa89b2edeeead3ac1f24bc39a63ac218cacb45d",
+    "timestamp": "2025-07-06T23:24:42.498Z"
+  },
+  {
+    "type": "settings",
+    "action": "modify",
+    "setting": "Wallet Settings",
+    "timestamp": "2025-07-06T23:39:04.911Z"
+  },
+  {
+    "type": "wallet_management",
+    "action": "added",
+    "count": 2,
+    "total": 3,
+    "timestamp": "2025-07-06T23:40:30.600Z"
   }
 ]

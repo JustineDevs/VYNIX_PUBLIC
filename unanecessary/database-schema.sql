@@ -1,8 +1,24 @@
 -- Testnet Automation Bot Database Schema
 -- Run this in your Supabase SQL Editor
 
--- Enable Row Level Security
-ALTER DATABASE postgres SET "app.jwt_secret" TO 'your_jwt_secret_key_here_make_it_long_and_secure';
+-- ALTER DATABASE postgres SET "app.jwt_secret" TO 'your_jwt_secret_key_here_make_it_long_and_secure';
+
+-- Drop existing objects to ensure a clean run
+DROP TYPE IF EXISTS user_role CASCADE;
+DROP TYPE IF EXISTS wallet_status CASCADE;
+DROP TYPE IF EXISTS task_status CASCADE;
+DROP TYPE IF EXISTS task_type CASCADE;
+DROP TYPE IF EXISTS payment_status CASCADE;
+DROP TYPE IF EXISTS payment_method CASCADE;
+
+DROP TABLE IF EXISTS users CASCADE;
+DROP TABLE IF EXISTS wallets CASCADE;
+DROP TABLE IF EXISTS activities CASCADE;
+DROP TABLE IF EXISTS tasks CASCADE;
+DROP TABLE IF EXISTS payments CASCADE;
+DROP TABLE IF EXISTS subscriptions CASCADE;
+DROP TABLE IF EXISTS network_configs CASCADE;
+DROP TABLE IF EXISTS token_configs CASCADE;
 
 -- Create custom types
 CREATE TYPE user_role AS ENUM ('user', 'admin', 'premium');
@@ -181,6 +197,27 @@ ALTER TABLE activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing RLS policies before creating them
+DROP POLICY IF EXISTS "Users can view own profile" ON users;
+DROP POLICY IF EXISTS "Users can update own profile" ON users;
+DROP POLICY IF EXISTS "Users can view own wallets" ON wallets;
+DROP POLICY IF EXISTS "Users can insert own wallets" ON wallets;
+DROP POLICY IF EXISTS "Users can update own wallets" ON wallets;
+DROP POLICY IF EXISTS "Users can delete own wallets" ON wallets;
+DROP POLICY IF EXISTS "Users can view own activities" ON activities;
+DROP POLICY IF EXISTS "Users can insert own activities" ON activities;
+DROP POLICY IF EXISTS "Users can view own tasks" ON tasks;
+DROP POLICY IF EXISTS "Users can insert own tasks" ON tasks;
+DROP POLICY IF EXISTS "Users can update own tasks" ON tasks;
+DROP POLICY IF EXISTS "Users can delete own tasks" ON tasks;
+DROP POLICY IF EXISTS "Users can view own payments" ON payments;
+DROP POLICY IF EXISTS "Users can insert own payments" ON payments;
+DROP POLICY IF EXISTS "Admins can manage all payments" ON payments;
+DROP POLICY IF EXISTS "Users can view own subscriptions" ON subscriptions;
+DROP POLICY IF EXISTS "Admins can manage all subscriptions" ON subscriptions;
+DROP POLICY IF EXISTS "Enable read access for all users" ON network_configs;
+DROP POLICY IF EXISTS "Enable read access for all users" ON token_configs;
 
 -- Create RLS policies
 -- Users can only access their own data
