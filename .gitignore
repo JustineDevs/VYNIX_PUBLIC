@@ -4,6 +4,11 @@ vars.json*
 /web
 /unanecessary*
 
+# Environment files with real private keys (create .env for your real keys)
+.env
+.env.local
+.env.production
+
 # Hardhat files
 /cache
 /artifacts
